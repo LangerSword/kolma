@@ -1,0 +1,71 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-and-test:
+    name: build, unit tests, TUI integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+          cache-dependency-path: tui/go.sum
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_WARNINGS_AS_ERRORS=ON
+
+      - name: Build the engine
+        run: cmake --build build
+
+      - name: Engine test suite
+        run: ./build/kolma_tests
+
+      - name: Smoke-test the CLI on a real file
+        run: |
+          set -euo pipefail
+          ./build/kolma algos
+          ./build/kolma analyze README.md
+          ./build/kolma compress README.md --out /tmp/readme.kolma
+          ./build/kolma info /tmp/readme.kolma
+          ./build/kolma decompress /tmp/readme.kolma --out /tmp/readme.out
+          cmp README.md /tmp/readme.out
+          ./build/kolma bench README.md --limit 64K
+
+      - name: Build the TUI
+        run: cd tui && go vet ./... && go build -o kolma-tui .
+
+      - name: TUI tests
+        run: cd tui && KOLMA_BIN=${{ github.workspace }}/build/kolma go test ./...
+
+      - name: TUI smoke test through a pty
+        run: python3 scripts/tui_smoke.py --tui tui/kolma-tui --engine build/kolma
+
+  sanitizers:
+    name: address + undefined behaviour sanitizers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure with sanitizers
+        run: cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKOLMA_SANITIZE=ON
+
+      - name: Build
+        run: cmake --build build-asan
+
+      - name: Test under sanitizers
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=0
+          UBSAN_OPTIONS: print_stacktrace=1
+        run: ./build-asan/kolma_tests

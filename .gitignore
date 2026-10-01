@@ -1,0 +1,27 @@
+# build output
+build/
+out/
+*.o
+*.a
+*.so
+compile_commands.json
+.cache/
+
+# go
+tui/kolma-tui
+tui/kolma-tui-*
+*.test
+
+# archives produced by tests and manual runs
+*.kolma
+!tests/data/*.kolma
+
+# editor / os
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# scratch
+/tmp/
+*.log
