@@ -290,7 +290,7 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 
 ```sh
 make test        # 51 C++ tests
-make tui-test    # 22 Go tests, driving the real engine binary
+make tui-test    # 24 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
 ```
