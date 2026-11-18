@@ -50,7 +50,7 @@ else
 fi
 [ "$expected" = "$actual" ] || { echo "kolma: CHECKSUM MISMATCH — refusing to install" >&2; exit 1; }
 
-tar -xzf "$tmp/$name" -C "$tmp"
+tar -xzf "$tmp/$name" -C "$tmp" --strip-components=1
 
 prefix="${KOLMA_PREFIX:-}"
 if [ -z "$prefix" ]; then
