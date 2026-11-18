@@ -189,11 +189,6 @@ func panelFill(title, right, content string, width, minHeight int, focused bool)
 	return panel(title, right, content, width, n, focused)
 }
 
-// keyHint renders one "key action" pair for the bottom bar.
-func keyHint(key, action string) string {
-	return keyStyle.Render(key) + " " + actionStyle.Render(action)
-}
-
 // header is the top line: brand, screen title, breadcrumb, engine version.
 func header(screen, breadcrumb, version string, width int) string {
 	left := brandStyle.Render("kolma") + "  " + titleStyle.Render(screen)

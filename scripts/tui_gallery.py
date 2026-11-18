@@ -106,35 +106,48 @@ def main() -> int:
             shot("01-browse")
             special("Down", 0.3)
             shot("02-browse-cursor")
-            special("Enter", 1.6)          # select sample.txt, analyse it
-            shot("03-inspect")
-            send("o", 0.4)                 # edit the output path
-            shot("04-inspect-editing")
+            send("/", 0.4)                      # open the fuzzy filter
+            shot("03-filter-input")
+            send("sam", 0.6)                    # type: matches sample.txt
+            shot("04-filter-typing")
+            special("Enter", 0.4)               # accept the filter
+            shot("05-filter-applied")
+            special("Escape", 0.4)              # clear it
+            special("Enter", 0.4)               # open the empty subdir
+            shot("06-empty-dir")
+            special("BSpace", 0.4)
+            special("Down", 0.3)
+            special("Enter", 1.6)               # select notes.txt, analyse it
+            shot("07-inspect")
+            send("o", 0.4)                      # edit the output path
+            shot("08-inspect-editing")
             special("Escape", 0.3)
-            send("c", 1.8)                 # compress -> result screen
-            shot("05-run-result")
-            special("Escape", 0.3)         # back to inspect
-            special("Escape", 0.3)         # back to browse
-            special("G", 0.3)              # last entry: secret.kolma
+            send("c", 1.8)                      # compress -> result screen
+            shot("09-run-result")
+            special("Escape", 0.3)
+            special("Escape", 0.3)              # back to browse
+            special("G", 0.3)                   # last entry: secret.kolma
             special("Enter", 1.4)
-            shot("06-inspect-archive")
-            send("d", 1.2)                 # decompress without password -> error
-            shot("07-run-error")
+            shot("10-inspect-archive")
+            send("d", 1.2)                      # decompress without password -> error
+            shot("11-run-error")
             special("Escape", 0.3)
-            send("i", 1.4)                 # info on the ENCRYPTED archive
-            shot("08-info-encrypted")
+            send("i", 1.4)                      # info on the ENCRYPTED archive
+            shot("12-info-encrypted")
             special("Escape", 0.3)
             special("Escape", 0.3)
-            special("Up", 0.3)             # sample.txt.kolma
+            special("Up", 0.3)                  # notes.txt.kolma
             special("Enter", 1.2)
-            send("i", 1.4)                 # archive info screen
-            shot("09-info")
+            send("i", 1.4)                      # archive info screen
+            shot("13-info")
             special("Escape", 0.3)
-            send("b", 3.5)                 # benchmark all seven methods
-            shot("10-bench")
+            send("b", 3.5)                      # benchmark all seven methods
+            shot("14-bench")
+            send("Down", 0.4)                   # move the table selection
+            shot("15-bench-selected")
             special("Escape", 0.3)
             send("?", 0.5)
-            shot("11-help")
+            shot("16-help")
         finally:
             tmux("kill-session", "-t", SESSION, check=False)
 

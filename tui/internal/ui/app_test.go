@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/cursor"
+	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
@@ -29,12 +31,14 @@ func newTestModel(t *testing.T) (Model, string) {
 	}
 	m := New(core.Client{Bin: "/nonexistent/kolma"}, "kolma 0.1.0")
 	m.width, m.height = 120, 40
+	m.list.SetSize(120, 37)
+	m.help.Width = 120
 	m.cwd = dir
 	m.refresh()
 	return m, dir
 }
 
-func key(s string) tea.KeyMsg {
+func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case "down":
 		return tea.KeyMsg{Type: tea.KeyDown}
@@ -61,7 +65,7 @@ func send(t *testing.T, m Model, keys ...string) Model {
 	t.Helper()
 	var model tea.Model = m
 	for _, k := range keys {
-		next, _ := model.Update(key(k))
+		next, _ := model.Update(keyMsg(k))
 		model = next
 	}
 	out, ok := model.(Model)
@@ -69,6 +73,44 @@ func send(t *testing.T, m Model, keys ...string) Model {
 		t.Fatalf("Update returned %T, want ui.Model", model)
 	}
 	return out
+}
+
+// drainCmds executes the commands an Update returned and feeds their messages
+// back, the way bubbletea's runtime does. Needed for async flows like the
+// list's fuzzy filter, whose matches arrive as a FilterMatchesMsg command.
+// The spinner's infinite tick chain is deliberately not chased.
+func drainCmds(m Model, cmd tea.Cmd) Model {
+	for cmd != nil {
+		msg := cmd()
+		if msg == nil {
+			return m
+		}
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			for _, c := range batch {
+				m = drainCmds(m, c)
+			}
+			return m
+		}
+		if _, ok := msg.(spinner.TickMsg); ok {
+			return m
+		}
+		if _, ok := msg.(cursor.BlinkMsg); ok {
+			return m // don't chase the text cursor's blink chain either
+		}
+		next, c := m.Update(msg)
+		m = next.(Model)
+		cmd = c
+	}
+	return m
+}
+
+func sendDrain(t *testing.T, m Model, keys ...string) Model {
+	t.Helper()
+	for _, k := range keys {
+		next, cmd := m.Update(keyMsg(k))
+		m = drainCmds(next.(Model), cmd)
+	}
+	return m
 }
 
 func TestBrowseListsDirectoriesFirst(t *testing.T) {
@@ -103,16 +145,16 @@ func TestNavigationAndHiddenToggle(t *testing.T) {
 	}
 
 	m = send(t, m, "down")
-	if m.cursor != 1 {
-		t.Fatalf("cursor should be 1 after one down, got %d", m.cursor)
+	if m.list.Index() != 1 {
+		t.Fatalf("cursor should be 1 after one down, got %d", m.list.Index())
 	}
 	m = send(t, m, "G")
-	if m.cursor != len(m.entries)-1 {
-		t.Fatalf("G should jump to the last entry, got %d", m.cursor)
+	if m.list.Index() != len(m.entries)-1 {
+		t.Fatalf("G should jump to the last entry, got %d", m.list.Index())
 	}
 	m = send(t, m, "g")
-	if m.cursor != 0 {
-		t.Fatalf("g should jump to the first entry, got %d", m.cursor)
+	if m.list.Index() != 0 {
+		t.Fatalf("g should jump to the first entry, got %d", m.list.Index())
 	}
 }
 
@@ -264,7 +306,7 @@ func TestOutputAndRequestDerivation(t *testing.T) {
 func TestRunningWithoutASelectionIsRefused(t *testing.T) {
 	m := New(core.Client{Bin: "/nonexistent/kolma"}, "kolma 0.1.0")
 	m.screen = screenInspect
-	next, _ := m.Update(key("c"))
+	next, _ := m.Update(keyMsg("c"))
 	model := next.(Model)
 	if model.running {
 		t.Fatal("a run started with no file selected")
@@ -385,7 +427,7 @@ func TestHelpTogglesAndQuitKeys(t *testing.T) {
 	for _, start := range []screen{screenBrowse, screenInspect, screenRun, screenInfo, screenBench} {
 		model := m
 		model.screen = start
-		next, cmd := model.Update(key("q"))
+		next, cmd := model.Update(keyMsg("q"))
 		if cmd == nil {
 			t.Fatalf("q on screen %v did not produce a command", start)
 		}
@@ -402,9 +444,6 @@ func TestWindowResizeIsHonoured(t *testing.T) {
 	m = next.(Model)
 	if m.width != 60 || m.height != 20 {
 		t.Fatalf("size is %dx%d, want 60x20", m.width, m.height)
-	}
-	if m.visibleRows() < 3 {
-		t.Fatalf("visible rows should never drop below 3, got %d", m.visibleRows())
 	}
 	view := m.View()
 	if strings.TrimSpace(view) == "" {
@@ -498,13 +537,13 @@ func TestMouseWheelMovesTheBrowserCursor(t *testing.T) {
 	m, _ := newTestModel(t)
 	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
 	m = next.(Model)
-	if m.cursor != 2 {
-		t.Fatalf("wheel down should move the cursor by 3 (clamped), got %d", m.cursor)
+	if m.list.Index() != 2 {
+		t.Fatalf("wheel down should move the cursor by 3 (clamped), got %d", m.list.Index())
 	}
 	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
 	m = next.(Model)
-	if m.cursor != 0 {
-		t.Fatalf("wheel up should return to the top, got %d", m.cursor)
+	if m.list.Index() != 0 {
+		t.Fatalf("wheel up should return to the top, got %d", m.list.Index())
 	}
 }
 
@@ -523,6 +562,70 @@ func TestPanelBordersAreExact(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestFilterNarrowsAndOpensTheMatch(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = sendDrain(t, m, "/")
+	if !m.list.SettingFilter() {
+		t.Fatal("/ should open the filter input")
+	}
+	m = sendDrain(t, m, "a", ".", "t")
+	if len(m.list.VisibleItems()) != 1 {
+		t.Fatalf("filter 'a.t' should leave 1 visible item, got %d", len(m.list.VisibleItems()))
+	}
+	m = sendDrain(t, m, "enter") // accept the filter
+	if m.list.SettingFilter() {
+		t.Fatal("enter should accept the filter and close the input")
+	}
+	m = send(t, m, "enter") // open the filtered selection
+	if m.screen != screenInspect || m.target.Name != "a.txt" {
+		t.Fatalf("enter on the filtered item should inspect a.txt, got screen=%v target=%q", m.screen, m.target.Name)
+	}
+}
+
+func TestFilterEscapeRestoresAllItems(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = sendDrain(t, m, "/", "z", "z", "z")
+	if len(m.list.VisibleItems()) != 0 {
+		t.Fatalf("filter 'zzz' should match nothing, got %d", len(m.list.VisibleItems()))
+	}
+	m = sendDrain(t, m, "esc")
+	if m.list.SettingFilter() {
+		t.Fatal("esc should cancel the filter input")
+	}
+	if len(m.list.VisibleItems()) != 3 {
+		t.Fatalf("cancel should restore all items, got %d", len(m.list.VisibleItems()))
+	}
+}
+
+func TestBenchTableMovesWithKeys(t *testing.T) {
+	m, _ := newTestModel(t)
+	m.bench = []core.BenchmarkRow{
+		{Algo: "lz77", Ratio: 0.25, BestRatio: true},
+		{Algo: "lzw", Ratio: 0.4},
+		{Algo: "store", Ratio: 1.0, BestSpeed: true},
+	}
+	m.syncBenchTable()
+	m.screen = screenBench
+	m = send(t, m, "down")
+	if m.benchTable.Cursor() != 1 {
+		t.Fatalf("down should move the table cursor to 1, got %d", m.benchTable.Cursor())
+	}
+	view := m.View()
+	if !strings.Contains(view, "dictionary") && !strings.Contains(view, "lzw") {
+		t.Fatalf("the bench view should show the table and the selected row's notes:\n%s", view)
+	}
+}
+
+func TestEmptyDirectoryShowsAHint(t *testing.T) {
+	m, dir := newTestModel(t)
+	m.cwd = filepath.Join(dir, "subdir")
+	m.refresh()
+	view := m.viewBrowse()
+	if !strings.Contains(view, "empty directory") {
+		t.Fatalf("an empty directory should say so:\n%s", view)
 	}
 }
 
@@ -552,6 +655,7 @@ func TestEveryScreenFitsTheTerminal(t *testing.T) {
 			{Algo: "lz77", Ratio: 0.4, OutputBytes: 4, ThroughputMBps: 20},
 			{Algo: "store", Ratio: 1.0, OutputBytes: 11, ThroughputMBps: 3000, BestSpeed: true},
 		}
+		m.syncBenchTable()
 		m.result = core.Result{OK: true, Stats: core.Stats{Algorithm: "lz77", AlgorithmName: "LZ77 (LZSS)",
 			Ratio: 0.4, OrigSize: 11, CompSize: 4, Level: 6, Chunks: 1, ChunkSize: 11, Threads: 16,
 			OrigCRC: "deadbeef", Encrypted: true, Authenticated: true, Output: "/tmp/a.txt.kolma"}}

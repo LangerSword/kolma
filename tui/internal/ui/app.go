@@ -6,8 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -80,7 +83,7 @@ type Model struct {
 
 	cwd        string
 	entries    []core.Entry
-	cursor     int
+	list       list.Model
 	showHidden bool
 
 	target     core.Entry
@@ -112,11 +115,14 @@ type Model struct {
 	archive    *core.ArchiveInfo
 	archiveErr string
 
-	bench []core.BenchmarkRow
+	bench      []core.BenchmarkRow
+	benchTable table.Model
 
 	spinner spinner.Model
 	bar     progress.Model
 	vp      viewport.Model
+	help    help.Model
+	keys    keyMap
 
 	version string
 }
@@ -149,21 +155,26 @@ func New(client core.Client, version string) Model {
 		cwd = "."
 	}
 	m := Model{
-		client:   client,
-		width:    100,
-		height:   30,
-		cwd:      cwd,
-		editing:  -1,
-		level:    0,
-		priority: 1,
-		threads:  0,
-		chunkIdx: 0,
-		version:  version,
-		inputs:   [2]textinput.Model{output, password},
-		spinner:  sp,
-		bar:      bar,
-		vp:       viewport.New(100, 27),
+		client:     client,
+		width:      100,
+		height:     30,
+		cwd:        cwd,
+		editing:    -1,
+		level:      0,
+		priority:   1,
+		threads:    0,
+		chunkIdx:   0,
+		version:    version,
+		inputs:     [2]textinput.Model{output, password},
+		list:       newBrowser(100, 27),
+		benchTable: newBenchTable(96),
+		spinner:    sp,
+		bar:        bar,
+		vp:         viewport.New(100, 27),
+		help:       brandHelp(),
+		keys:       newKeyMap(),
 	}
+	m.help.Width = 100
 	m.refresh()
 	return m
 }
@@ -174,12 +185,20 @@ func (m *Model) refresh() {
 		m.status = fmt.Sprintf("cannot read %s: %v", m.cwd, err)
 		m.statusErr = true
 		m.entries = nil
+		m.list.SetItems(nil)
 		return
 	}
 	m.entries = entries
-	if m.cursor >= len(m.entries) {
-		m.cursor = max(0, len(m.entries)-1)
+	items := make([]list.Item, len(entries))
+	for i, e := range entries {
+		items[i] = entryItem{entry: e}
 	}
+	idx := m.list.Index()
+	m.list.SetItems(items)
+	if idx >= len(items) {
+		idx = max(0, len(items)-1)
+	}
+	m.list.Select(idx)
 }
 
 func (m Model) Init() tea.Cmd {
@@ -262,16 +281,6 @@ func (m *Model) setStatus(msg string, isErr bool) {
 // contentHeight is the space between the header line and the status/key bars.
 func (m Model) contentHeight() int { return max(3, m.height-3) }
 
-func (m Model) visibleRows() int { return max(3, m.contentHeight()-2) }
-
-func (m Model) windowOffset() int {
-	rows := m.visibleRows()
-	if m.cursor < rows {
-		return 0
-	}
-	return m.cursor - rows + 1
-}
-
 func (m Model) shortVersion() string {
 	fields := strings.Fields(m.version)
 	if len(fields) >= 2 {
@@ -289,6 +298,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.vp.Width = msg.Width
 		m.vp.Height = m.contentHeight()
+		m.list.SetSize(msg.Width, m.contentHeight())
+		m.help.Width = msg.Width
+		m.benchTable.SetWidth(max(20, msg.Width) - 4)
+		m.syncBenchTable()
 		for i := range m.inputs {
 			m.inputs[i].Width = min(48, max(10, msg.Width-22))
 		}
@@ -357,6 +370,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.result = msg.res
 		if msg.kind == "benchmark" {
 			m.bench = msg.res.Benchmark
+			m.syncBenchTable()
 		}
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
@@ -384,6 +398,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
+
+	case list.FilterMatchesMsg:
+		// The list's fuzzy filter runs as a command and reports back with this
+		// message; it must reach the list or filtering never applies.
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -392,15 +413,20 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if m.screen == screenBrowse {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			m.cursor = max(0, m.cursor-3)
+			for i := 0; i < 3; i++ {
+				m.list.CursorUp()
+			}
 		case tea.MouseButtonWheelDown:
-			m.cursor = min(len(m.entries)-1, m.cursor+3)
+			for i := 0; i < 3; i++ {
+				m.list.CursorDown()
+			}
 		case tea.MouseButtonLeft:
 			if msg.Action == tea.MouseActionPress {
-				// Row 0 is the header, row 1 the panel's top border.
-				idx := m.windowOffset() + msg.Y - 2
-				if idx >= 0 && idx < len(m.entries) {
-					m.cursor = idx
+				// Row 0 is the app header; the list body starts at row 1.
+				start := m.list.Paginator.Page * m.list.Paginator.PerPage
+				idx := start + msg.Y - 1
+				if idx >= 0 && idx < len(m.list.VisibleItems()) {
+					m.list.Select(idx)
 				}
 			}
 		}
@@ -458,7 +484,32 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch m.screen {
 	case screenBrowse:
-		return m.browseKey(key)
+		// While the filter input is open it owns the keyboard (esc cancels,
+		// enter accepts); everything else routes through the list.
+		if m.list.SettingFilter() {
+			if key == "ctrl+c" {
+				return m, tea.Quit
+			}
+			var cmd tea.Cmd
+			m.list, cmd = m.list.Update(msg)
+			return m, cmd
+		}
+		switch key {
+		case "enter", "l", "right":
+			return m.browseOpen()
+		case "backspace", "h", "left":
+			return m.browseUpDir()
+		case ".":
+			m.showHidden = !m.showHidden
+			m.refresh()
+			return m, nil
+		case "r":
+			m.refresh()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.list, cmd = m.list.Update(msg)
+		return m, cmd
 	case screenInspect:
 		// Settings keys own the letters; the arrows and page keys scroll.
 		switch key {
@@ -468,7 +519,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		return m.inspectKey(key)
-	case screenRun, screenInfo, screenBench:
+	case screenRun, screenInfo:
 		if key == "esc" {
 			m.screen = screenInspect
 			m.vp.GotoTop()
@@ -476,6 +527,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	case screenBench:
+		if key == "esc" {
+			m.screen = screenInspect
+			m.vp.GotoTop()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.benchTable, cmd = m.benchTable.Update(msg)
 		return m, cmd
 	case screenHelp:
 		var cmd tea.Cmd
@@ -485,45 +545,28 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m Model) browseKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "up", "k":
-		if m.cursor > 0 {
-			m.cursor--
-		}
-	case "down", "j":
-		if m.cursor < len(m.entries)-1 {
-			m.cursor++
-		}
-	case "g":
-		m.cursor = 0
-	case "G":
-		m.cursor = max(0, len(m.entries)-1)
-	case "backspace", "left", "h":
-		parent := filepath.Dir(m.cwd)
-		if parent != m.cwd {
-			m.cwd = parent
-			m.cursor = 0
-			m.refresh()
-		}
-	case "r":
+func (m Model) browseOpen() (tea.Model, tea.Cmd) {
+	item := m.list.SelectedItem()
+	if item == nil {
+		return m, nil
+	}
+	entry := item.(entryItem).entry
+	if entry.IsDir {
+		m.cwd = entry.Path
 		m.refresh()
-	case ".":
-		m.showHidden = !m.showHidden
+		m.list.Select(0)
+		return m, nil
+	}
+	m.selectTarget(entry)
+	return m, tea.Batch(m.analyzeCmd(entry.Path), m.spinner.Tick)
+}
+
+func (m Model) browseUpDir() (tea.Model, tea.Cmd) {
+	parent := filepath.Dir(m.cwd)
+	if parent != m.cwd {
+		m.cwd = parent
 		m.refresh()
-	case "enter", "l", "right":
-		if len(m.entries) == 0 {
-			return m, nil
-		}
-		entry := m.entries[m.cursor]
-		if entry.IsDir {
-			m.cwd = entry.Path
-			m.cursor = 0
-			m.refresh()
-			return m, nil
-		}
-		m.selectTarget(entry)
-		return m, tea.Batch(m.analyzeCmd(entry.Path), m.spinner.Tick)
+		m.list.Select(0)
 	}
 	return m, nil
 }
@@ -772,13 +815,9 @@ func (m Model) View() string {
 		}
 		status = badge + " " + clip(sanitize(m.status), width-3)
 	}
-	hints := m.keyHintsFor()
-	if overflow && m.screen == screenInspect {
-		// Scrolling is essential when content overflows: give the hint a
-		// priority slot so narrow terminals keep it.
-		hints = append(hints[:2], append([]string{keyHint("↑↓", "scroll")}, hints[2:]...)...)
-	}
-	keys := fitKeyBar(hints, width)
+	hp := m.help
+	hp.Width = width
+	keys := hp.ShortHelpView(m.keys.shortFor(m.screen, overflow && m.screen == screenInspect))
 	return head + "\n" + body + "\n" + status + "\n" + keys
 }
 
@@ -807,44 +846,6 @@ func (m Model) breadcrumb() string {
 	return m.target.Path
 }
 
-// keyHintsFor lists the screen's hints in priority order: fitKeyBar keeps as
-// many as fit, so narrow terminals lose the least important hints first.
-func (m Model) keyHintsFor() []string {
-	switch m.screen {
-	case screenBrowse:
-		return []string{keyHint("↑↓", "move"), keyHint("enter", "open"), keyHint("?", "help"),
-			keyHint("q", "quit"), keyHint("bksp", "up"), keyHint(".", "hidden"), keyHint("r", "refresh")}
-	case screenInspect:
-		return []string{keyHint("c", "compress"), keyHint("d", "decompress"), keyHint("esc", "back"),
-			keyHint("?", "keys"), keyHint("b", "bench"), keyHint("i", "info"),
-			keyHint("o", "output"), keyHint("w", "password")}
-	case screenRun, screenInfo, screenBench:
-		return []string{keyHint("esc", "back"), keyHint("↑↓", "scroll"), keyHint("q", "quit")}
-	case screenHelp:
-		return []string{keyHint("?/esc", "close"), keyHint("q", "quit")}
-	}
-	return nil
-}
-
-func fitKeyBar(hints []string, width int) string {
-	sep := dimStyle.Render("  ·  ")
-	sepW := ansi.StringWidth(sep)
-	var kept []string
-	used := 0
-	for _, h := range hints {
-		add := ansi.StringWidth(h)
-		if len(kept) > 0 {
-			add += sepW
-		}
-		if used+add > width {
-			break
-		}
-		kept = append(kept, h)
-		used += add
-	}
-	return strings.Join(kept, sep)
-}
-
 func (m Model) screenContent() string {
 	switch m.screen {
 	case screenInspect:
@@ -864,47 +865,13 @@ func (m Model) screenContent() string {
 // -------------------------------------------------------------------- browse
 
 func (m Model) viewBrowse() string {
-	rows := m.visibleRows()
-	offset := m.windowOffset()
-	inner := max(16, max(20, m.width)-4)
-	nameW := max(8, inner-2-4-1-10-1)
-
-	lines := make([]string, 0, rows)
+	width := max(20, m.width)
 	if len(m.entries) == 0 {
-		lines = append(lines, dimStyle.Render("(empty directory)"))
+		empty := dimStyle.Render("(empty directory)") + "\n\n" +
+			dimStyle.Render("press . to show hidden files, r to refresh")
+		return panel("browse", "0/0", empty, width, m.contentHeight(), true)
 	}
-	for i := offset; i < len(m.entries) && i < offset+rows; i++ {
-		entry := m.entries[i]
-		name := sanitize(entry.Name)
-		kind := "file"
-		if entry.IsDir {
-			kind = "dir "
-			name += "/"
-		} else if entry.IsArchive {
-			kind = "arc "
-		}
-		size := core.HumanSize(uint64(max64(entry.Size)))
-		nameClipped := padRight(clip(name, nameW), nameW)
-		if i == m.cursor {
-			raw := fmt.Sprintf("▸ %s %s %s", kind, nameClipped, padLeft(size, 10))
-			lines = append(lines, selectedStyle.Render(padRight(raw, inner)))
-			continue
-		}
-		kindStyled := dimStyle.Render(kind)
-		nameStyled := textStyle.Render(nameClipped)
-		if entry.IsDir {
-			kindStyled = accentStyle.Render(kind)
-			nameStyled = accentStyle.Render(nameClipped)
-		} else if entry.IsArchive {
-			kindStyled = warnStyle.Render(kind)
-		}
-		lines = append(lines, fmt.Sprintf("  %s %s %s", kindStyled, nameStyled, dimStyle.Render(padLeft(size, 10))))
-	}
-	right := ""
-	if len(m.entries) > 0 {
-		right = fmt.Sprintf("%d/%d", m.cursor+1, len(m.entries))
-	}
-	return panel("browse", right, strings.Join(lines, "\n"), max(20, m.width), m.contentHeight(), true)
+	return m.list.View()
 }
 
 func max64(v int64) int64 {
@@ -914,27 +881,18 @@ func max64(v int64) int64 {
 	return v
 }
 
-// ratioBar renders "0.3671 ████▌···········": the number plus a 16-cell bar
-// with sub-cell precision (fractional block glyphs), scaled so the worst
-// ratio fills the track. Lower ratio = shorter bar = better compression.
+// ratioBar renders "0.3671 ━━━━············": the number plus a 16-cell bar
+// scaled so the worst ratio fills the track. Line glyphs (not solid blocks)
+// so the bar stays legible both on the dark canvas and inside the mint
+// selected-row highlight, where block glyphs would read as black notches.
 func ratioBar(ratio, maxRatio float64) string {
 	const cells = 16
-	frac := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
 	used := 0.0
 	if maxRatio > 0 {
 		used = ratio / maxRatio * cells
 	}
-	if used > cells {
-		used = cells
-	}
-	full := int(used)
-	rest := int((used - float64(full)) * 8)
-	bar := strings.Repeat("█", full)
-	if rest > 0 && full < cells {
-		bar += string(frac[rest-1])
-		full++
-	}
-	bar += strings.Repeat("·", cells-full)
+	filled := max(0, min(cells, int(used+0.5)))
+	bar := strings.Repeat("━", filled) + strings.Repeat("·", cells-filled)
 	return padRight(fmt.Sprintf("%7.4f ", ratio)+bar, 24)
 }
 
@@ -1188,51 +1146,23 @@ func (m Model) viewBench() string {
 		b.WriteString(dimStyle.Render("  no results"))
 		return panelFill("benchmark", sanitize(m.target.Name), b.String(), width, m.contentHeight(), false)
 	}
-	maxRatio := 0.0
-	for _, r := range m.bench {
-		if r.Ratio > maxRatio {
-			maxRatio = r.Ratio
-		}
-	}
-	showBar := inner >= 72
-	if showBar {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  %-12s  %-24s  %10s  %12s  %s",
-			"algorithm", "ratio", "output", "throughput", "note")) + "\n")
-	} else {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  %-12s  %7s  %10s  %12s  %s",
-			"algorithm", "ratio", "output", "throughput", "note")) + "\n")
-	}
-	for _, r := range m.bench {
-		note := ""
-		if r.BestRatio {
-			note = "best ratio"
-		}
-		if r.BestSpeed {
-			if note != "" {
-				note += ", "
+	notes := ""
+	if c := m.benchTable.Cursor(); c >= 0 && c < len(m.bench) {
+		id := m.bench[c].Algo
+		for _, a := range m.algos {
+			if a.ID == id {
+				notes = a.Notes
+				break
 			}
-			note += "fastest"
 		}
-		out := padLeft(core.HumanSize(r.OutputBytes), 10)
-		thr := padLeft(core.HumanRate(r.ThroughputMBps), 12)
-		var line string
-		if showBar {
-			line = fmt.Sprintf("  %-12s  %-24s  %s  %s  %s", r.Algo, ratioBar(r.Ratio, maxRatio), out, thr, note)
-		} else {
-			line = fmt.Sprintf("  %-12s  %7.4f  %s  %s  %s", r.Algo, r.Ratio, out, thr, note)
-		}
-		switch {
-		case r.BestRatio:
-			line = accentStyle.Render(line)
-		case r.BestSpeed:
-			line = infoStyle.Render(line)
-		default:
-			line = subtleStyle.Render(line)
-		}
-		b.WriteString(clip(line, inner) + "\n")
 	}
-	b.WriteString("\n  " + dimStyle.Render("ratio = compressed / original; lower is better"))
-	return panelFill("benchmark", sanitize(m.target.Name), strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), false)
+	content := m.benchTable.View() + "\n\n  " + dimStyle.Render("ratio = compressed / original; lower is better")
+	if notes != "" {
+		for _, ln := range strings.Split(ansi.Wordwrap(sanitize(notes), max(10, inner-4), ""), "\n") {
+			content += "\n  " + subtleStyle.Render(ln)
+		}
+	}
+	return panelFill("benchmark", sanitize(m.target.Name), content, width, m.contentHeight(), true)
 }
 
 // ---------------------------------------------------------------------- help
@@ -1240,35 +1170,40 @@ func (m Model) viewBench() string {
 func (m Model) viewHelp() string {
 	width := max(20, m.width)
 	inner := width - 4
-	k := func(key, action string) string {
-		return clip("    "+keyStyle.Render(padRight(key, 14))+actionStyle.Render(action), inner)
-	}
-	section := func(name string) string { return "  " + titleStyle.Render(name) }
 	var b strings.Builder
 	intro := "kolma drives a pluggable compression engine. This interface is a client of the kolma binary: every screen is a real command, and every number comes from the engine's JSON output."
 	for _, ln := range strings.Split(ansi.Wordwrap(intro, max(10, inner-2), ""), "\n") {
 		b.WriteString("  " + dimStyle.Render(ln) + "\n")
 	}
-	b.WriteString("\n" + section("browse") + "\n")
-	b.WriteString(k("↑/↓ · j/k", "move") + "\n")
-	b.WriteString(k("enter · l", "open a directory, or select a file and analyse it") + "\n")
-	b.WriteString(k("backspace", "go up a directory") + "\n")
-	b.WriteString(k(". · r · g/G", "hidden files · refresh · top/bottom") + "\n")
-	b.WriteString("\n" + section("inspect") + "\n")
-	b.WriteString(k("a / A", "cycle the algorithm (auto lets the Analyzer choose)") + "\n")
-	b.WriteString(k("[ / ]", "level, 1 fastest .. 9 best ratio (0 = auto)") + "\n")
-	b.WriteString(k("p · t/T · k", "priority · threads · chunk size") + "\n")
-	b.WriteString(k("o · w", "edit the output path · set a password") + "\n")
-	b.WriteString(k("c · d", "compress · decompress") + "\n")
-	b.WriteString(k("b · i", "benchmark every method · read an archive's header") + "\n")
-	b.WriteString("\n" + section("run · archive · benchmark") + "\n")
-	b.WriteString(k("esc", "back to the file") + "\n")
-	b.WriteString(k("↑/↓ · wheel", "scroll") + "\n")
-	b.WriteString("\n" + section("everywhere") + "\n")
-	b.WriteString(k("? · q", "help · quit") + "\n")
-	b.WriteString("\n  " + dimStyle.Render(clip(sanitize(m.version), inner-2)) + "\n")
+	hp := m.help
+	hp.Width = inner
+	b.WriteString("\n" + hp.FullHelpView(m.keys.fullGroups()))
+	b.WriteString("\n\n  " + dimStyle.Render(clip(sanitize(m.version), inner-2)) + "\n")
 	b.WriteString("  " + dimStyle.Render(clip("archives: format v2, CRC-32 verified; encrypted archives carry an HMAC-SHA256 tag", inner-2)))
 	return b.String()
+}
+
+// syncBenchTable rebuilds the bubbles/table rows from the latest results and
+// the current width. Called when results arrive and when the window resizes;
+// View only renders, never mutates.
+func (m *Model) syncBenchTable() {
+	inner := max(20, m.width) - 4
+	wide := inner >= 84
+	maxRatio := 0.0
+	for _, r := range m.bench {
+		if r.Ratio > maxRatio {
+			maxRatio = r.Ratio
+		}
+	}
+	m.benchTable.SetColumns(benchColumns(wide))
+	rows := make([]table.Row, len(m.bench))
+	for i, r := range m.bench {
+		rows[i] = benchRow(r, maxRatio, wide)
+	}
+	m.benchTable.SetRows(rows)
+	m.benchTable.SetWidth(inner)
+	m.benchTable.SetHeight(max(3, min(len(rows)+1, m.contentHeight()-7)))
+	m.benchTable.SetCursor(0)
 }
 
 // Run starts the program.
