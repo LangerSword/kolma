@@ -128,7 +128,7 @@ std::array<uint8_t, 32> sha256_final(Sha256Ctx& c) {
   c.buflen = 64;
   sha256_block(c, c.buf);
   std::array<uint8_t, 32> out{};
-  for (int i = 0; i < 8; ++i) {
+  for (size_t i = 0; i < 8; ++i) {
     out[i * 4] = uint8_t(c.h[i] >> 24);
     out[i * 4 + 1] = uint8_t(c.h[i] >> 16);
     out[i * 4 + 2] = uint8_t(c.h[i] >> 8);

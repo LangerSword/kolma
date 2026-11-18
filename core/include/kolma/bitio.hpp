@@ -11,7 +11,7 @@ namespace kolma {
 // Little-endian base-128 varint, 7 bits per byte, high bit = "more follows".
 inline void put_varint(Bytes& out, uint64_t v) {
   while (v >= 0x80) {
-    out.push_back(uint8_t(v) | 0x80);
+    out.push_back(uint8_t(uint8_t(v) | 0x80));
     v >>= 7;
   }
   out.push_back(uint8_t(v));
@@ -44,7 +44,7 @@ inline void put_u64(Bytes& out, uint64_t v) {
 
 inline bool get_u16(View in, size_t& pos, uint16_t& v) {
   if (pos + 2 > in.size()) return false;
-  v = uint16_t(in[pos]) | (uint16_t(in[pos + 1]) << 8);
+  v = uint16_t(uint16_t(in[pos]) | (uint16_t(in[pos + 1]) << 8));
   pos += 2;
   return true;
 }
@@ -70,7 +70,7 @@ class BitWriter {
 
   void put(uint32_t value, int bits) {
     for (int i = bits - 1; i >= 0; --i) {
-      cur_ = uint8_t((cur_ << 1) | ((value >> i) & 1u));
+      cur_ = uint8_t((uint32_t(cur_) << 1) | ((value >> i) & 1u));
       if (++filled_ == 8) {
         out_.push_back(cur_);
         cur_ = 0;
@@ -108,7 +108,7 @@ class BitReader {
     for (int i = 0; i < bits; ++i) {
       if (pos_ >= in_.size()) return false;
       uint8_t bit = uint8_t((in_[pos_] >> (7 - bit_)) & 1u);
-      value = (value << 1) | bit;
+      value = (value << 1) | uint32_t(bit);
       if (++bit_ == 8) {
         bit_ = 0;
         ++pos_;
