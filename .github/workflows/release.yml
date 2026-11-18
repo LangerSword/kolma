@@ -1,0 +1,103 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build ${{ matrix.platform }}-${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: amd64
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+          - os: macos-latest
+            platform: darwin
+            arch: arm64
+          - os: macos-latest
+            platform: darwin
+            arch: amd64
+            cmake-arch: x86_64
+            goarch: amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tui/go.mod
+          cache-dependency-path: tui/go.sum
+
+      - name: Install build tools (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DKOLMA_WARNINGS_AS_ERRORS=ON
+          ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }}
+
+      - name: Build the engine
+        run: cmake --build build
+
+      - name: Test the engine
+        # Skipped for the darwin-amd64 cross-build: an x86_64 binary cannot
+        # execute on the arm64 macOS runner. Native builds are always tested.
+        if: ${{ !matrix.cmake-arch }}
+        run: ./build/kolma_tests
+
+      - name: Build the TUI
+        run: cd tui && go build -trimpath -ldflags "-s -w" -o kolma-tui .
+        env:
+          GOARCH: ${{ matrix.goarch || '' }}
+          CGO_ENABLED: "0"
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          stage=kolma-${{ matrix.platform }}-${{ matrix.arch }}
+          mkdir "$stage"
+          cp build/kolma tui/kolma-tui README.md LICENSE "$stage/"
+          tar czf "$stage.tar.gz" "$stage"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kolma-${{ matrix.platform }}-${{ matrix.arch }}
+          path: kolma-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: publish the release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum kolma-*.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/kolma-*.tar.gz dist/checksums.txt \
+            --title "kolma $GITHUB_REF_NAME" --generate-notes

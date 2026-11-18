@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(kolma
-        VERSION 0.1.0
+        VERSION 1.0.0
         DESCRIPTION "A pluggable compression engine with an analyser, a parallel chunk engine and a terminal UI"
         LANGUAGES CXX)
 
