@@ -16,6 +16,7 @@ tui/kolma-tui-*
 # archives produced by tests and manual runs
 *.kolma
 !tests/data/*.kolma
+!tests/fuzz_corpus/*.kolma
 
 # editor / os
 .vscode/

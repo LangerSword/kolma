@@ -14,6 +14,7 @@ endif()
 
 option(KOLMA_WARNINGS_AS_ERRORS "Treat warnings as errors" OFF)
 option(KOLMA_SANITIZE "Build with address+undefined sanitizers" OFF)
+option(KOLMA_FUZZ "Build the libFuzzer harness (Clang only)" OFF)
 
 add_library(kolma_flags INTERFACE)
 target_compile_features(kolma_flags INTERFACE cxx_std_20)
@@ -67,5 +68,18 @@ add_executable(kolma_tests
 )
 target_link_libraries(kolma_tests PRIVATE kolma_core)
 add_test(NAME kolma_tests COMMAND kolma_tests)
+
+# ------------------------------------------------------------------ fuzzing
+if(KOLMA_FUZZ)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR "KOLMA_FUZZ requires Clang (libFuzzer)")
+  endif()
+  target_compile_options(kolma_flags INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
+  target_link_options(kolma_flags INTERFACE -fsanitize=address,undefined)
+  add_executable(kolma_fuzz tests/fuzz_archive.cpp)
+  target_link_libraries(kolma_fuzz PRIVATE kolma_core)
+  target_compile_options(kolma_fuzz PRIVATE -fsanitize=fuzzer)
+  target_link_options(kolma_fuzz PRIVATE -fsanitize=fuzzer)
+endif()
 
 install(TARGETS kolma RUNTIME DESTINATION bin)

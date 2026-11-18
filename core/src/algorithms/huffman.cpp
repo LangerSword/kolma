@@ -87,12 +87,22 @@ void assign_canonical_codes(const std::vector<uint8_t>& lengths, std::array<uint
     if (lengths[size_t(a)] != lengths[size_t(b)]) return lengths[size_t(a)] < lengths[size_t(b)];
     return a < b;
   });
-  uint32_t next_code = 0;
+  // The length table is untrusted on the decode side: a stored byte can be up
+  // to 255. Validate every length and every assigned code here, BEFORE anything
+  // indexes a table by length or shifts by a length difference. The arithmetic
+  // runs in 64 bits so a shift of up to 32 is defined, and each code must fit
+  // in its declared length (this also rejects over-subscribed tables).
+  uint64_t next_code = 0;
   int current_len = 0;
   for (int s : order) {
-    next_code <<= (lengths[size_t(s)] - current_len);
-    current_len = lengths[size_t(s)];
-    codes[size_t(s)] = next_code++;
+    const int len = lengths[size_t(s)];
+    if (len > kMaxCodeLength) throw FormatError("huffman: code length exceeds 32 bits");
+    next_code <<= (len - current_len);
+    current_len = len;
+    if (next_code >= (uint64_t(1) << len))
+      throw FormatError("huffman: invalid canonical code table");
+    codes[size_t(s)] = uint32_t(next_code);
+    ++next_code;
   }
 }
 

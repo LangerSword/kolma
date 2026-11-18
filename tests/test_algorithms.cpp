@@ -162,6 +162,33 @@ KOLMA_TEST(huffman_handles_a_single_distinct_byte) {
   CHECK(out.size() < one.size() / 8 + 512);
 }
 
+KOLMA_TEST(huffman_rejects_hostile_code_length_tables) {
+  // Regression: the stored length table is untrusted. A length byte of 255
+  // used to shift a 32-bit code past its width (UB) and index the 33-entry
+  // decode table out of bounds (found by the libFuzzer harness under ASan).
+  const Algorithm* h = find_algorithm("huffman");
+  auto block_with_lengths = [](const std::vector<uint8_t>& lengths) {
+    Bytes b;
+    put_varint(b, 16);  // declared original size
+    b.insert(b.end(), lengths.begin(), lengths.end());
+    b.insert(b.end(), 8, 0);  // a little bitstream
+    return b;
+  };
+  Bytes restored;
+  std::vector<uint8_t> lengths(256, 0);
+
+  lengths[65] = 255;  // far past 32 bits
+  CHECK_THROWS(h->decompress_block(View(block_with_lengths(lengths)), restored, 16));
+  lengths[65] = 33;  // one past the maximum
+  CHECK_THROWS(h->decompress_block(View(block_with_lengths(lengths)), restored, 16));
+  lengths[65] = 32;  // exactly 32: legal width, must not crash on the shift
+  CHECK_THROWS(h->decompress_block(View(block_with_lengths(lengths)), restored, 16));
+
+  std::fill(lengths.begin(), lengths.end(), uint8_t(0));
+  lengths[65] = lengths[66] = lengths[67] = 1;  // three 1-bit codes cannot exist
+  CHECK_THROWS(h->decompress_block(View(block_with_lengths(lengths)), restored, 16));
+}
+
 KOLMA_TEST(bwt_handles_periodic_and_pathological_input) {
   Bytes periodic;
   const std::string unit = "abcabcabcabc";

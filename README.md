@@ -301,10 +301,11 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 ## Testing
 
 ```sh
-make test        # 71 C++ tests
+make test        # 75 C++ tests
 make tui-test    # 24 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
+make fuzz        # libFuzzer under ASan/UBSan (needs clang; FUZZ_TIME=seconds)
 ```
 
 What the C++ suite covers:
@@ -350,6 +351,17 @@ message rejection and rendering of every screen. `scripts/tui_smoke.py` runs the
 real binary under a pseudo-terminal, answers its terminal capability queries,
 sends keystrokes, and asserts on the rendered frames — including that pressing
 `c` actually writes an archive to disk.
+
+**Fuzzing.** `tests/fuzz_archive.cpp` is a libFuzzer harness that feeds untrusted
+bytes to three surfaces every iteration: the in-memory header parser, the full
+file path (loader, MAC/CRC gates, chunk pipeline), and every algorithm's
+`decompress_block` directly. It runs under AddressSanitizer +
+UndefinedBehaviorSanitizer, locally via `make fuzz` and for 60 seconds on every
+CI push. The seed corpus in `tests/fuzz_corpus/` includes real archives for all
+seven methods plus the regression inputs the fuzzer has found — among them a
+hostile Huffman code-length table that used to shift past 32 bits and index the
+decode table out of bounds. Crash inputs are kept as seeds, so a bug once found
+stays found.
 
 ## Performance
 

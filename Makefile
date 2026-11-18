@@ -5,6 +5,7 @@
 #   make tui-test   run the Go suite (needs the engine, it is an integration test)
 #   make smoke      drive the TUI through a pty and assert on what it renders
 #   make check      everything above, in order
+#   make fuzz       build and run the libFuzzer harness (needs clang; FUZZ_TIME=120)
 #   make bench FILE=somefile.bin
 
 BUILD_DIR   ?= build
@@ -13,8 +14,9 @@ CMAKE       ?= cmake
 GENERATOR   ?= Ninja
 ENGINE      := $(CURDIR)/$(BUILD_DIR)/kolma
 TUI         := $(CURDIR)/tui/kolma-tui
+FUZZ_TIME   ?= 120
 
-.PHONY: all configure engine tui test tui-test smoke check bench clean distclean install help
+.PHONY: all configure engine tui test tui-test smoke check fuzz bench clean distclean install help
 
 all: engine tui
 
@@ -40,6 +42,12 @@ smoke: engine tui
 	python3 scripts/tui_smoke.py --tui tui/kolma-tui --engine $(BUILD_DIR)/kolma
 
 check: test tui-test smoke
+
+fuzz:
+	$(CMAKE) -S . -B build-fuzz -G $(GENERATOR) -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKOLMA_FUZZ=ON
+	$(CMAKE) --build build-fuzz --target kolma_fuzz
+	ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1 \
+	  ./build-fuzz/kolma_fuzz tests/fuzz_corpus -max_total_time=$(FUZZ_TIME) -timeout=10 -rss_limit_mb=2048
 
 bench: engine
 	@test -n "$(FILE)" || { echo "usage: make bench FILE=path"; exit 2; }
