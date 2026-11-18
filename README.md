@@ -225,7 +225,7 @@ Three details that matter more than the table:
 
 ## Archive format
 
-One self-describing container, little-endian throughout:
+One self-describing container, little-endian throughout (format version 2):
 
 ```
 magic "KOLMA" | version u16 | algorithm u8 | level u8 | file type u8 | flags u8
@@ -234,9 +234,13 @@ chunk_size u64 | chunk_count u32 | kdf_iterations u32
 salt[16] | nonce[12]
 name_len u16 | name | detail_len u16 | detail
 chunk_count x { orig_size u64 | comp_size u64 | flags u8 }
-payload_crc u32
+payload_crc u32 | mac[32]
 payload: the compressed chunks, concatenated in order
 ```
+
+Version 1 is the same layout without the `mac` field; it is still readable.
+The tag is `HMAC-SHA256(mac_key, payload || header-without-the-tag)`, so every
+metadata byte is authenticated along with the ciphertext.
 
 Every chunk is independently decodable, which is what makes parallel
 compression and bounded memory possible. Chunk flag bit 0 marks a chunk stored
@@ -252,15 +256,23 @@ which is why the rewrite is safe.
 `--password` (or `KOLMA_PASSWORD`) encrypts the payload with **ChaCha20** under a
 key derived by **PBKDF2-HMAC-SHA256** with a 16-byte random salt and 200 000
 iterations. Each chunk uses the header nonce with its index in the last four
-bytes, so no two chunks share a keystream. The `Encrypted` flag and the KDF
-parameters live in the header; the password is never stored or logged.
+bytes, so no two chunks share a keystream. The password is never stored or logged.
+
+Since format version 2 the archive is **authenticated, not just encrypted**:
+the KDF derives 64 bytes, split into an encryption key and a separate MAC key,
+and an **HMAC-SHA256** tag covers the ciphertext payload followed by the whole
+header (Encrypt-then-MAC). Decompression verifies the tag in constant time
+*before it creates any output file*, so a wrong password or a single flipped
+bit — in the payload, the chunk table, the salt or any header field — fails
+cheaply and writes nothing. Version 1 archives (no tag) are still readable and
+are honestly reported as `legacy v1, NOT authenticated`.
 
 The primitives are verified against published vectors — SHA-256 and HMAC against
 FIPS 180-4 and RFC 4231, PBKDF2 against RFC 7918/7914 vectors, ChaCha20 against
 the RFC 8439 §2.4.2 sunscreen ciphertext. That is the limit of the claim: this is
-a from-scratch implementation, **not audited**, and there is no authentication
-tag, so it protects data at rest from casual inspection and nothing more. Use
-age or GPG for anything that matters.
+a from-scratch implementation, **not audited**. Unencrypted archives carry a
+CRC-32, which detects corruption but not deliberate tampering. For anything
+that matters, use age or GPG alongside it.
 
 ## Design notes
 
@@ -289,7 +301,7 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 ## Testing
 
 ```sh
-make test        # 51 C++ tests
+make test        # 71 C++ tests
 make tui-test    # 24 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
@@ -316,6 +328,17 @@ What the C++ suite covers:
   round-trips and rejects a wrong password, damaged archives fail verification,
   the engine refuses to overwrite its own input, and progress callbacks are
   monotonic.
+- **Authentication (format v2).** Encrypted archives round-trip authenticated;
+  a flipped bit in the payload, the header or the salt, a wrong password, and
+  even a chunk reordering that keeps every size consistent all fail the HMAC
+  before any output file is created. Legacy v1 archives still read, and are
+  reported as unauthenticated. The streaming HMAC is checked against the
+  one-shot RFC-vector implementation over uneven update boundaries.
+- **Untrusted headers.** A 4-billion-entry chunk table is refused before any
+  allocation, inconsistent sizes and oversized chunks are rejected, extreme
+  KDF iteration counts are capped, 5000-chunk headers load and round-trip,
+  truncated payloads are refused before work starts, and hostile source names
+  (separators, control characters, NUL) never become output paths.
 - **Analyzer behaviour.** Magic bytes beat extensions, the veto fires on
   entropy-coded formats and on uniform random data, and recommendations match
   the priority.
@@ -394,9 +417,12 @@ flake.nix               reproducible build definition (see the note above)
 
 ## Limitations
 
-- **No authentication.** Encryption has no MAC, so a modified archive is detected
-  by the CRC-32 of the restored data but not before decryption. It is not
-  tamper-proof.
+- **Unencrypted archives are not tamper-proof.** They carry a CRC-32, which
+  detects corruption but not deliberate modification. Encryption (v2) adds a
+  real authentication tag; the crypto is still a from-scratch, unaudited
+  implementation.
+- **Legacy v1 archives have no tag.** They are readable for compatibility and
+  reported as unauthenticated; re-compress them to get v2 protection.
 - **`bwt-mtf-ari` is slow** and its block size is capped at 256 KiB for that
   reason. A parallel suffix-array construction would lift the cap.
 - **The benchmark uses each method's preferred block size**, so on small inputs

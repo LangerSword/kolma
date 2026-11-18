@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
@@ -24,6 +25,23 @@ std::string crc32_hex(uint32_t value);
 std::array<uint8_t, 32> sha256(View data);
 std::array<uint8_t, 32> sha256(std::string_view text);
 std::array<uint8_t, 32> hmac_sha256(View key, View message);
+// Streaming HMAC-SHA256, for authenticating payloads too large to buffer.
+// Same construction as the one-shot version (RFC 2104 / RFC 4231 vectors).
+class HmacSha256 {
+ public:
+  explicit HmacSha256(View key);
+  ~HmacSha256();
+  HmacSha256(HmacSha256&&) noexcept;
+  HmacSha256& operator=(HmacSha256&&) noexcept;
+  HmacSha256(const HmacSha256&) = delete;
+  HmacSha256& operator=(const HmacSha256&) = delete;
+  void update(View data);
+  std::array<uint8_t, 32> final();
+
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 // PBKDF2-HMAC-SHA256 (RFC 8018). out_len must be <= 32 * 2^32 / 1.
 Bytes pbkdf2_sha256(std::string_view password, View salt, uint32_t iterations, size_t out_len = 32);
 

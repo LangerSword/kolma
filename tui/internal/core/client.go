@@ -38,6 +38,7 @@ type Stats struct {
 	RestoredCRC    string  `json:"restored_crc"`
 	Verified       bool    `json:"verified"`
 	Encrypted      bool    `json:"encrypted"`
+	Authenticated  bool    `json:"authenticated"`
 	Output         string  `json:"output"`
 }
 
@@ -94,6 +95,7 @@ type ArchiveInfo struct {
 	Created          uint64 `json:"created"`
 	OrigCRC          string `json:"orig_crc"`
 	Encrypted        bool   `json:"encrypted"`
+	Authenticated    bool   `json:"authenticated"`
 	KDFIterations    uint32 `json:"kdf_iterations"`
 	HeaderConsistent bool   `json:"header_consistent"`
 	PayloadCRCOK     bool   `json:"payload_crc_ok"`

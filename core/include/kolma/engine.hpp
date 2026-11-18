@@ -61,6 +61,7 @@ struct Stats {
   bool verified = false;
   bool restoring = false;  // true for decompression, so the report can say what was checked
   bool encrypted = false;
+  bool authenticated = false;  // encrypted AND MAC-verified (v2); v1 archives are not
   std::string output_path;
 };
 

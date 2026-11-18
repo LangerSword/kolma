@@ -19,9 +19,10 @@ constexpr size_t kFixedHeaderBytes =
 }  // namespace
 
 Bytes serialize_header(const ArchiveHeader& header) {
+  const size_t mac_bytes = header.version >= 2 ? kMacSize : 0;
   Bytes out;
   out.reserve(kFixedHeaderBytes + header.source_name.size() + header.type_detail.size() +
-              header.chunks.size() * 17 + 4);
+              header.chunks.size() * 17 + 4 + mac_bytes);
   out.insert(out.end(), kArchiveMagic.begin(), kArchiveMagic.end());
   put_u16(out, header.version);
   out.push_back(header.algo_index);
@@ -47,6 +48,10 @@ Bytes serialize_header(const ArchiveHeader& header) {
     out.push_back(c.flags);
   }
   put_u32(out, header.payload_crc);
+  if (header.version >= 2) {
+    if (header.mac.size() != kMacSize) throw FormatError("header mac must be 32 bytes");
+    out.insert(out.end(), header.mac.begin(), header.mac.end());
+  }
   return out;
 }
 
@@ -64,10 +69,11 @@ bool parse_header(View data, ArchiveHeader& out, size_t& payload_offset, std::st
     error = "truncated version";
     return false;
   }
-  if (out.version != kArchiveVersion) {
+  if (out.version != 1 && out.version != kArchiveVersion) {
     error = "unsupported archive version " + std::to_string(out.version);
     return false;
   }
+  const size_t mac_bytes = out.version >= 2 ? kMacSize : 0;
   out.algo_index = data[pos++];
   out.level = data[pos++];
   out.file_type = data[pos++];
@@ -86,7 +92,7 @@ bool parse_header(View data, ArchiveHeader& out, size_t& payload_offset, std::st
     error = "archive claims zero chunks";
     return false;
   }
-  if (uint64_t(out.chunk_count) * 17 + 4 > uint64_t(data.size() - pos)) {
+  if (uint64_t(out.chunk_count) * 17 + 4 + mac_bytes > uint64_t(data.size() - pos)) {
     error = "chunk table claims more data than the archive holds";
     return false;
   }
@@ -155,6 +161,16 @@ bool parse_header(View data, ArchiveHeader& out, size_t& payload_offset, std::st
   if (!get_u32(data, pos, out.payload_crc)) {
     error = "missing payload checksum";
     return false;
+  }
+  out.mac.assign(kMacSize, 0);
+  if (mac_bytes > 0) {
+    if (pos + kMacSize > data.size()) {
+      error = "missing authentication tag";
+      return false;
+    }
+    out.mac.assign(data.begin() + std::ptrdiff_t(pos),
+                   data.begin() + std::ptrdiff_t(pos + kMacSize));
+    pos += kMacSize;
   }
   // The table must describe exactly the payload, or the archive is damaged.
   if (total_orig != out.orig_size || total_comp != out.comp_size ||
@@ -229,7 +245,15 @@ bool load_archive_header(const std::string& path, ArchiveHeader& header, size_t&
     error = "truncated header";
     return false;
   }
-  const uint64_t total = detail_len_pos + 2 + detail_len + uint64_t(chunk_count) * 17 + 4;
+  uint16_t version = 0;
+  size_t version_pos = kArchiveMagic.size();
+  if (!get_u16(View(head), version_pos, version)) {
+    error = "truncated header";
+    return false;
+  }
+  const uint64_t mac_bytes = version >= 2 ? kMacSize : 0;
+  const uint64_t total =
+      detail_len_pos + 2 + detail_len + uint64_t(chunk_count) * 17 + 4 + mac_bytes;
   if (total > kMaxHeaderBytes) {
     error = "archive header exceeds the 64 MiB limit";
     return false;
@@ -250,7 +274,28 @@ bool load_archive_header(const std::string& path, ArchiveHeader& header, size_t&
 
 Bytes derive_key(const std::string& password, const ArchiveHeader& header) {
   uint32_t iterations = header.kdf_iterations == 0 ? kDefaultKdfIterations : header.kdf_iterations;
+  if (iterations > kMaxKdfIterations)
+    throw FormatError("kdf iterations exceed the supported maximum (10000000)");
   return pbkdf2_sha256(password, View(header.salt), iterations, 32);
+}
+
+void derive_keys(const std::string& password, const ArchiveHeader& header, Bytes& enc_key,
+                 Bytes& mac_key) {
+  enc_key.clear();
+  mac_key.clear();
+  if (header.version >= 2 && archive_encrypted(header)) {
+    uint32_t iterations =
+        header.kdf_iterations == 0 ? kDefaultKdfIterations : header.kdf_iterations;
+    if (iterations > kMaxKdfIterations)
+      throw FormatError("kdf iterations exceed the supported maximum (10000000)");
+    // One KDF pass, two independent keys: encryption and authentication never
+    // share key material.
+    Bytes both = pbkdf2_sha256(password, View(header.salt), iterations, 64);
+    enc_key.assign(both.begin(), both.begin() + 32);
+    mac_key.assign(both.begin() + 32, both.end());
+  } else {
+    enc_key = derive_key(password, header);
+  }
 }
 
 std::vector<uint8_t> nonce_for_chunk(const ArchiveHeader& header, uint32_t index) {
@@ -268,6 +313,7 @@ ArchiveInfo read_archive_info(const std::string& path, bool check_payload) {
   const ArchiveHeader& h = info.header;
   info.ok = true;
   info.encrypted = archive_encrypted(h);
+  info.authenticated = info.encrypted && h.version >= 2;
   if (const Algorithm* a = algorithm_by_index(h.algo_index)) {
     info.algorithm_id = a->params().id;
     info.algorithm_name = a->params().name;

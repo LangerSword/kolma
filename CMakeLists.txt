@@ -61,6 +61,7 @@ add_executable(kolma_tests
   tests/test_util.cpp
   tests/test_algorithms.cpp
   tests/test_archive.cpp
+  tests/test_auth.cpp
   tests/test_engine.cpp
   tests/test_analyzer.cpp
 )

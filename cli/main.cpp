@@ -209,6 +209,7 @@ std::string stats_json(const kolma::Stats& s) {
      << ",\"restored_crc\":" << jstr(kolma::crc32_hex(s.restored_crc))
      << ",\"verified\":" << (s.verified ? "true" : "false")
      << ",\"encrypted\":" << (s.encrypted ? "true" : "false")
+     << ",\"authenticated\":" << (s.authenticated ? "true" : "false")
      << ",\"output\":" << jstr(s.output_path) << "}";
   return os.str();
 }
@@ -267,6 +268,7 @@ std::string archive_info_json(const kolma::ArchiveInfo& info) {
      << ",\"chunk_size\":" << h.chunk_size << ",\"created\":" << h.created
      << ",\"orig_crc\":" << jstr(kolma::crc32_hex(h.orig_crc))
      << ",\"encrypted\":" << (info.encrypted ? "true" : "false")
+     << ",\"authenticated\":" << (info.authenticated ? "true" : "false")
      << ",\"kdf_iterations\":" << h.kdf_iterations
      << ",\"header_consistent\":" << (info.header_consistent ? "true" : "false")
      << ",\"payload_crc_ok\":" << (info.payload_crc_ok ? "true" : "false")

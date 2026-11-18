@@ -11,6 +11,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <random>
 #include <sstream>
@@ -268,6 +269,8 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
   header.chunks.assign(chunk_count, ChunkRecord{});
 
   Bytes key;
+  Bytes mac_key;
+  std::unique_ptr<HmacSha256> mac_stream;
   const bool encrypt = !job.password.empty();
   if (encrypt) {
     header.flags |= kArchiveEncrypted;
@@ -275,7 +278,10 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
     std::random_device rd;
     for (uint8_t& b : header.salt) b = uint8_t(rd());
     for (uint8_t& b : header.nonce) b = uint8_t(rd());
-    key = derive_key(job.password, header);
+    derive_keys(job.password, header, key, mac_key);
+    // Encrypt-then-MAC: the tag covers the ciphertext payload followed by the
+    // whole header (minus the tag field itself), streamed as chunks are written.
+    mac_stream = std::make_unique<HmacSha256>(View(mac_key));
   }
 
   FileDescriptor source(job.input);
@@ -339,6 +345,7 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
         if (!payload.empty()) {
           out.write(reinterpret_cast<const char*>(payload.data()), std::streamsize(payload.size()));
           payload_crc = crc32(View(payload), payload_crc);
+          if (mac_stream) mac_stream->update(View(payload));
         }
         if (!out) {
           write_error = "write failed at chunk " + std::to_string(index) +
@@ -367,6 +374,15 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
   header.comp_size = bytes_out;
   header.orig_crc = orig_crc;
   header.payload_crc = payload_crc;
+  if (mac_stream) {
+    // Finalise the tag over payload || header-prefix. The header is serialised
+    // with a zero tag first so its length is fixed, then the tag is filled in.
+    std::fill(header.mac.begin(), header.mac.end(), uint8_t(0));
+    Bytes prefix_header = serialize_header(header);
+    mac_stream->update(View(prefix_header.data(), prefix_header.size() - kMacSize));
+    auto tag = mac_stream->final();
+    header.mac.assign(tag.begin(), tag.end());
+  }
   Bytes final_header = serialize_header(header);
   if (final_header.size() != header_bytes.size()) {
     r.error = "internal error: header size changed while finalising";
@@ -403,6 +419,7 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
   r.stats.verified = true;  // written from the same bytes that produced the checksum
   r.stats.restoring = false;
   r.stats.encrypted = encrypt;
+  r.stats.authenticated = encrypt;  // every new encrypted archive carries a MAC
   r.stats.output_path = output;
   return r;
 }
@@ -424,7 +441,52 @@ Result run_decompress(const Job& job, const ProgressFn& on_progress) {
     return r;
   }
   Bytes key;
-  if (encrypted) key = derive_key(job.password, header);
+  Bytes mac_key;
+  if (encrypted) derive_keys(job.password, header, key, mac_key);
+
+  // Authenticate BEFORE any output exists: stream the payload once through
+  // HMAC-SHA256, append the header prefix (everything but the tag field), and
+  // compare in constant time. A wrong password or a single flipped bit anywhere
+  // in the archive fails here, cheaply and without writing a byte.
+  bool authenticated = false;
+  if (encrypted && header.version >= 2) {
+    std::ifstream in(job.input, std::ios::binary);
+    if (!in) {
+      r.error = "cannot reopen " + job.input;
+      return r;
+    }
+    HmacSha256 mac{View(mac_key)};
+    in.seekg(std::streamoff(payload_offset));
+    Bytes buffer(1u << 20);
+    uint64_t read_total = 0;
+    while (read_total < header.comp_size) {
+      size_t want = size_t(std::min<uint64_t>(buffer.size(), header.comp_size - read_total));
+      in.read(reinterpret_cast<char*>(buffer.data()), std::streamsize(want));
+      size_t got = size_t(in.gcount());
+      if (got == 0) break;
+      mac.update(View(buffer.data(), got));
+      read_total += got;
+    }
+    if (read_total != header.comp_size) {
+      r.error = "archive payload is truncated";
+      return r;
+    }
+    Bytes prefix(payload_offset - kMacSize);
+    in.clear();
+    in.seekg(0);
+    in.read(reinterpret_cast<char*>(prefix.data()), std::streamsize(prefix.size()));
+    if (size_t(in.gcount()) != prefix.size()) {
+      r.error = "cannot re-read the archive header";
+      return r;
+    }
+    mac.update(View(prefix));
+    auto tag = mac.final();
+    if (!constant_time_equal(View(tag), View(header.mac))) {
+      r.error = "authentication failed: wrong password or tampered archive";
+      return r;
+    }
+    authenticated = true;
+  }
 
   const Algorithm* algo = algorithm_by_index(header.algo_index);
   if (algo == nullptr && header.chunk_count > 0) {
@@ -574,6 +636,7 @@ Result run_decompress(const Job& job, const ProgressFn& on_progress) {
   r.stats.restored_crc = restored_crc;
   r.stats.restoring = true;
   r.stats.encrypted = encrypted;
+  r.stats.authenticated = authenticated;
   r.stats.output_path = output;
 
   if (bytes_out != header.orig_size) {
@@ -781,7 +844,12 @@ std::string format_stats(const Stats& s) {
   } else {
     os << "crc32       : " << crc32_hex(s.orig_crc) << " recorded in the header\n";
   }
-  os << "encrypted   : " << (s.encrypted ? "yes (ChaCha20 + PBKDF2-HMAC-SHA256)" : "no") << "\n";
+  os << "encrypted   : "
+     << (s.encrypted
+             ? (s.authenticated ? "yes (ChaCha20 + PBKDF2-HMAC-SHA256, HMAC-SHA256 authenticated)"
+                                : "yes (legacy v1, NOT authenticated)")
+             : "no")
+     << "\n";
   if (!s.output_path.empty()) os << "output      : " << s.output_path << "\n";
   return os.str();
 }
@@ -838,7 +906,10 @@ std::string format_archive_info(const ArchiveInfo& info) {
      << "\n";
   os << "chunks      : " << h.chunk_count << " x " << human_size(h.chunk_size) << "\n";
   os << "encrypted   : " << (info.encrypted ? "yes" : "no");
-  if (info.encrypted) os << " (PBKDF2-HMAC-SHA256, " << h.kdf_iterations << " iterations)";
+  if (info.encrypted) {
+    os << " (PBKDF2-HMAC-SHA256, " << h.kdf_iterations << " iterations)";
+    os << (info.authenticated ? ", HMAC-SHA256 authenticated" : ", legacy v1: NOT authenticated");
+  }
   os << "\n";
   os << "created     : " << h.created << "\n";
   os << "crc32       : " << crc32_hex(h.orig_crc) << "\n";

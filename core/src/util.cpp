@@ -149,6 +149,20 @@ std::array<uint8_t, 32> sha256(std::string_view text) {
 }
 
 std::array<uint8_t, 32> hmac_sha256(View key, View message) {
+  HmacSha256 h(key);
+  h.update(message);
+  return h.final();
+}
+
+// Streaming HMAC: the inner hash absorbs the message incrementally; final()
+// wraps it in the outer hash exactly like the one-shot version above.
+struct HmacSha256::Impl {
+  Sha256Ctx inner;
+  uint8_t opad_key[64];
+  bool done = false;
+};
+
+HmacSha256::HmacSha256(View key) : impl_(std::make_unique<Impl>()) {
   constexpr size_t B = 64;
   uint8_t k[B] = {0};
   if (key.size() > B) {
@@ -157,20 +171,31 @@ std::array<uint8_t, 32> hmac_sha256(View key, View message) {
   } else if (!key.empty()) {
     std::memcpy(k, key.data(), key.size());
   }
-  uint8_t ipad[B], opad[B];
+  uint8_t ipad[B];
   for (size_t i = 0; i < B; ++i) {
     ipad[i] = uint8_t(k[i] ^ 0x36);
-    opad[i] = uint8_t(k[i] ^ 0x5C);
+    impl_->opad_key[i] = uint8_t(k[i] ^ 0x5C);
   }
-  Sha256Ctx inner;
-  sha256_init(inner);
-  sha256_update(inner, ipad, B);
-  sha256_update(inner, message.data(), message.size());
-  auto ih = sha256_final(inner);
+  sha256_init(impl_->inner);
+  sha256_update(impl_->inner, ipad, B);
+}
 
+HmacSha256::~HmacSha256() = default;
+HmacSha256::HmacSha256(HmacSha256&&) noexcept = default;
+HmacSha256& HmacSha256::operator=(HmacSha256&&) noexcept = default;
+
+void HmacSha256::update(View data) {
+  if (impl_->done) throw std::logic_error("hmac: update after final");
+  sha256_update(impl_->inner, data.data(), data.size());
+}
+
+std::array<uint8_t, 32> HmacSha256::final() {
+  if (impl_->done) throw std::logic_error("hmac: final called twice");
+  impl_->done = true;
+  auto ih = sha256_final(impl_->inner);
   Sha256Ctx outer;
   sha256_init(outer);
-  sha256_update(outer, opad, B);
+  sha256_update(outer, impl_->opad_key, 64);
   sha256_update(outer, ih.data(), ih.size());
   return sha256_final(outer);
 }
