@@ -1,12 +1,16 @@
 # kolma
 
-A pluggable file-compression engine with an analyser in front of it, a parallel
-chunk engine underneath, and a terminal interface on top.
+**A compression engine that shows its work.** Seven methods behind one
+interface, an analyser that measures before it commits, a parallel chunk
+engine underneath, authenticated encryption, and a terminal interface on top.
 
 [![ci](https://github.com/LangerSword/kolma/actions/workflows/ci.yml/badge.svg)](https://github.com/LangerSword/kolma/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/LangerSword/kolma)](https://github.com/LangerSword/kolma/releases/latest)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![C++20](https://img.shields.io/badge/engine-C%2B%2B20-informational)
 ![Go](https://img.shields.io/badge/interface-Go-00ADD8)
+
+![kolma demo](docs/demo.gif)
 
 `kolma` is a working implementation of a six-entity design: **User, File,
 Analyzer, Algorithm, Engine, Archive**. Seven compression methods live behind
@@ -14,8 +18,9 @@ one interface, an analyser measures the input before committing to a method, and
 the engine splits large files into chunks it compresses in parallel and verifies
 on the way back out. Nothing is claimed that the test suite does not exercise:
 the primitives are checked against published RFC vectors, every method is
-round-tripped over eleven input shapes, and the terminal interface is driven
-through a real pseudo-terminal in CI.
+round-tripped over eleven input shapes, the parser and every decoder are fuzzed
+under sanitizers in CI, and the terminal interface is driven through a real
+pseudo-terminal and vision-checked at three terminal sizes.
 
 ```
 $ kolma compress /usr/bin/cmake
@@ -83,6 +88,14 @@ results are consumed strictly in order so a 40 GiB file never needs more than
 
 ## Quick start
 
+Install the latest release (Linux/macOS, amd64/arm64; verifies sha256):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/LangerSword/kolma/master/scripts/install.sh | sh
+```
+
+Or build from source:
+
 ```sh
 git clone https://github.com/LangerSword/kolma
 cd kolma
@@ -96,54 +109,47 @@ make check      # unit tests, Go integration tests, and a pty-driven TUI test
 ```
 
 Requirements: a C++20 compiler, CMake 3.20+, Ninja (or Make), Go 1.24+ for the
-interface, and Python 3 only for the pty smoke test.
+interface, and Python 3 only for the pty smoke test. Prebuilt binaries for
+Linux and macOS (amd64 + arm64) are on the
+[releases page](https://github.com/LangerSword/kolma/releases/latest).
+
+It composes with pipes, too:
+
+```sh
+cat data.bin | kolma compress - > data.kolma          # stdin -> archive
+kolma decompress data.kolma -o - > restored.bin       # archive -> stdout
+KOLMA_PASSWORD=pw kolma compress - < secret.txt \
+  | KOLMA_PASSWORD=pw kolma decompress - > copy.txt   # encrypted, end to end
+```
 
 ## The terminal interface
 
 `kolma-tui` is a client, not a reimplementation. It shells out to the engine and
 reads the JSON contract the CLI emits, so there is exactly one implementation of
-every algorithm and the interface can be replaced without touching it.
+every algorithm and the interface can be replaced without touching it. Built on
+[bubbletea](https://github.com/charmbracelet/bubbletea),
+[lipgloss](https://github.com/charmbracelet/lipgloss) and
+[bubbles](https://github.com/charmbracelet/bubbles); the design follows the
+discipline of lazygit and btop — one dark canvas, five semantic hues, panels
+with border-embedded titles, and a contextual key bar.
 
-```
-kolma  browse   /tmp/kolma-smoke
-> file binary.bin                                    11.37 MiB
-  file cmake.bin                                     11.37 MiB
-  arc  cmake.kolma                                    7.07 MiB
-  1/7
-↑/↓ move · enter open · backspace up · . hidden · r refresh · q quit
-```
+| browse | inspect |
+| --- | --- |
+| ![browse](docs/screenshots/browse.png) | ![inspect](docs/screenshots/inspect.png) |
+
+| run result | benchmark |
+| --- | --- |
+| ![run result](docs/screenshots/run-result.png) | ![benchmark](docs/screenshots/bench.png) |
 
 Selecting a file runs the analyser for real and shows you what it found, along
-with the evidence:
-
-```
-kolma  inspect   /tmp/kolma-smoke/cmake.bin
-
-analyzer
-  size          11.37 MiB
-  type          Executable (elf)
-  entropy       5.9163 bits/byte
-  compressible  56.0%
-  recommends    lz77
-  sample trials:
-    lz77           ratio 0.4397      223.23 ms
-    lzw            ratio 0.5096       42.25 ms
-    huffman        ratio 0.7431       12.30 ms
-    delta-rle      ratio 1.8837        7.88 ms
-
-settings
-  algorithm     auto (the Analyzer decides)
-  level         auto (from the priority)
-  priority      balanced
-  threads       auto (hardware concurrency)
-  chunk size    auto (from level and memory limit)
-  output        /tmp/kolma-smoke/cmake.bin.kolma
-  password      (none: the archive will not be encrypted)
-```
+with the evidence: the verdict, the sample trials with their ratios and times,
+and the rationale. Settings sit beside it (stacked on narrow terminals); every
+panel scrolls when the terminal is short, and nothing ever overflows — a test
+asserts that at four terminal sizes.
 
 | key | what it does |
 | --- | --- |
-| `j` / `k`, arrows | move in the browser |
+| `j` / `k`, arrows | move in the browser (mouse wheel and click work too) |
 | `enter` | open a directory, or select a file and analyse it |
 | `backspace` | go up a directory |
 | `.` | show or hide dotfiles |
@@ -153,8 +159,9 @@ settings
 | `t` / `T` | worker threads |
 | `k` | chunk size |
 | `o` / `w` | edit the output path, set a password |
-| `c` / `d` | compress, decompress |
+| `c` / `d` | compress, decompress (a second press confirms overwriting) |
 | `b` / `i` | benchmark every method, read an archive's header |
+| `↑` / `↓`, wheel | scroll long screens |
 | `?` | help |
 | `esc` | back one screen |
 | `q` | quit |
@@ -167,7 +174,7 @@ command line, so it does not appear in `ps`.
 ## The CLI
 
 ```
-kolma compress   <file> [options]      # also: c, pack
+kolma compress   <file> [options]      # also: c, pack; <file> may be - (stdin)
 kolma decompress <archive> [options]   # also: d, unpack, extract
 kolma analyze    <file>                # the Analyzer's verdict and its evidence
 kolma bench      <file>                # every method against the same input
@@ -181,12 +188,13 @@ kolma version
 | `-a, --algo <id>` | `store`, `rle`, `huffman`, `lz77`, `lzw`, `bwt-mtf-ari`, `delta-rle`, or `auto` |
 | `-l, --level <1-9>` | effort; 1 is fastest, 9 is best ratio |
 | `-p, --priority <p>` | `maxratio`, `balanced`, `maxspeed` (used when `--algo` is `auto`) |
-| `-o, --out <path>` | output path |
+| `-o, --out <path>` | output path; `-` writes the payload to stdout (reports go to stderr) |
 | `--password <pw>` | encrypt; visible in `ps`, so prefer `KOLMA_PASSWORD` |
 | `-t, --threads <n>` | worker threads, default is hardware concurrency |
-| `--chunk-size <s>` | bytes per chunk, accepts `64K` / `4M` suffixes |
+| `--chunk-size <s>` | bytes per chunk, accepts `64K` / `4M` suffixes (max `64M`) |
 | `--memory-limit <s>` | working-set ceiling, default `256M` |
 | `--no-verify` | skip the checksum check on decompression |
+| `-f, --force` | overwrite an existing output (refused by default) |
 | `--json` | one progress object per tick on stderr, one result object on stdout |
 | `-q, --quiet` | no progress line |
 
@@ -302,7 +310,7 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 
 ```sh
 make test        # 75 C++ tests
-make tui-test    # 24 Go tests, driving the real engine binary
+make tui-test    # 32 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
 make fuzz        # libFuzzer under ASan/UBSan (needs clang; FUZZ_TIME=seconds)
@@ -420,10 +428,15 @@ core/include/kolma/     public headers: util, bitio, file, algorithm, analyzer, 
 core/src/               the entities; src/algorithms/ holds one file per method
 cli/main.cpp            the command line front end and the JSON contract
 tui/                    the Go interface (main.go, internal/core, internal/ui)
-tests/                  the C++ suite and its fixtures
+tests/                  the C++ suite, its fixtures, and the libFuzzer harness
+tests/fuzz_corpus/      fuzz seeds: real archives plus every crash ever found
 scripts/tui_smoke.py    pty-driven interface test
-docs/                   the design notes this project was built from
-.github/workflows/ci.yml  build, tests, sanitizers
+scripts/tui_gallery.py  captures every screen at three sizes as PNGs
+scripts/tui_demo.py     records docs/demo.gif
+scripts/render_ansi.py  ANSI screen dump -> SVG -> PNG
+scripts/install.sh      checksum-verified release installer
+docs/                   design notes, demo GIF, screenshots
+.github/workflows/      ci.yml (build, tests, sanitizers, fuzz) and release.yml
 flake.nix               reproducible build definition (see the note above)
 ```
 
@@ -445,6 +458,15 @@ flake.nix               reproducible build definition (see the note above)
 - **Level 9 buys almost nothing over level 6** on the corpus measured here. It is
   kept because the design calls for nine levels and it does help on other inputs,
   but the honest advice is to use level 3 or 6.
+
+## Security
+
+Encrypted archives are authenticated (Encrypt-then-MAC), the parser is fuzzed
+and hardened against hostile headers, and outputs are never overwritten
+without `--force`. The crypto is from scratch and **not audited**; unencrypted
+archives are CRC-protected, not tamper-proof. The full threat model — what is
+protected, what is not, and how to report a vulnerability — is in
+[SECURITY.md](SECURITY.md).
 
 ## License
 

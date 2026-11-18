@@ -27,3 +27,5 @@ tui/kolma-tui-*
 # scratch
 /tmp/
 *.log
+docs/.demo-work/
+tui-gallery/
