@@ -32,6 +32,7 @@ struct Job {
   size_t chunk_size = 0;    // 0 = derived from level, memory limit and the algorithm
   size_t memory_limit = 256u << 20;
   bool verify = true;
+  bool force = false;  // overwrite an existing output (refused by default)
 };
 
 struct Progress {

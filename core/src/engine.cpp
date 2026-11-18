@@ -172,6 +172,14 @@ bool same_file(const std::string& a, const std::string& b) {
   return a == b;
 }
 
+// symlink_status, not status: a dangling symlink still counts as "exists",
+// because opening it would create (or truncate) its target.
+bool output_exists(const std::string& path) {
+  std::error_code ec;
+  auto st = std::filesystem::symlink_status(path, ec);
+  return !ec && std::filesystem::exists(st);
+}
+
 std::string strip_kolma_suffix(const std::string& path) {
   constexpr std::string_view suffix = ".kolma";
   if (path.size() > suffix.size() &&
@@ -243,6 +251,10 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
 
   const size_t threads =
       job.threads > 0 ? job.threads : std::max<size_t>(1, std::thread::hardware_concurrency());
+  if (job.chunk_size > kMaxChunkSize) {
+    r.error = "chunk size exceeds the 64 MiB maximum";
+    return r;
+  }
   size_t chunk_size =
       job.chunk_size > 0 ? job.chunk_size : default_chunk_size(level, job.memory_limit, threads, algo);
   chunk_size = std::max<size_t>(chunk_size, 1);
@@ -253,6 +265,10 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
       job.output.empty() ? default_output_path(job.input, Mode::Compress) : job.output;
   if (same_file(output, job.input)) {
     r.error = "refusing to write the archive over its own input (" + output + ")";
+    return r;
+  }
+  if (!job.force && output_exists(output)) {
+    r.error = "output already exists: " + output + " (use --force to overwrite)";
     return r;
   }
 
@@ -519,6 +535,10 @@ Result run_decompress(const Job& job, const ProgressFn& on_progress) {
   }
   if (same_file(output, job.input)) {
     r.error = "refusing to write the restored file over the archive (" + output + ")";
+    return r;
+  }
+  if (!job.force && output_exists(output)) {
+    r.error = "output already exists: " + output + " (use --force to overwrite)";
     return r;
   }
 

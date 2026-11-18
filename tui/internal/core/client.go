@@ -274,6 +274,7 @@ type RunRequest struct {
 	Threads   int
 	ChunkSize int64
 	NoVerify  bool
+	Force     bool
 }
 
 func (r RunRequest) args(mode string) []string {
@@ -298,6 +299,9 @@ func (r RunRequest) args(mode string) []string {
 	}
 	if r.NoVerify {
 		args = append(args, "--no-verify")
+	}
+	if r.Force {
+		args = append(args, "--force")
 	}
 	return args
 }

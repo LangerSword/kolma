@@ -265,6 +265,11 @@ KOLMA_TEST(decompression_uses_the_recorded_source_name) {
   Job back;
   back.mode = Mode::Decompress;
   back.input = renamed;
+  // The original still exists: restoring over it needs explicit force.
+  Result refused = run_job(back);
+  CHECK(!refused.ok);
+  CHECK(refused.error.find("already exists") != std::string::npos);
+  back.force = true;
   Result rb = run_job(back);
   CHECK(rb.ok);
   CHECK_EQ(rb.stats.output_path, dir + "/original-name.dat");
@@ -309,4 +314,86 @@ KOLMA_TEST(benchmark_covers_every_algorithm_and_ranks_by_ratio) {
   for (const BenchmarkRow& row : r.benchmark) best_ratio_flags += row.best_ratio ? 1 : 0;
   CHECK_EQ(best_ratio_flags, 1);
   CHECK(r.benchmark.front().ratio < 0.4);  // repetitive input must actually shrink
+}
+
+// ------------------------------------------------------ overwrite protection --
+
+KOLMA_TEST(existing_outputs_are_refused_unless_forced) {
+  const std::string dir = round_trip_dir();
+  const std::string in = dir + "/overwrite.in";
+  const std::string arc = dir + "/overwrite.kolma";
+  const std::string out = dir + "/overwrite.out";
+  kolma_test::write_bytes(in, kolma_test::make_repetitive(20000));
+
+  Job job;
+  job.mode = Mode::Compress;
+  job.input = in;
+  job.output = arc;
+  job.algorithm = "lz77";
+  CHECK(run_job(job).ok);
+
+  // Second compress onto the same archive: refused, archive untouched.
+  const Bytes before = kolma_test::read_bytes(arc);
+  Result again = run_job(job);
+  CHECK(!again.ok);
+  CHECK(again.error.find("already exists") != std::string::npos);
+  CHECK_BYTES_EQ(kolma_test::read_bytes(arc), before);
+  job.force = true;
+  CHECK(run_job(job).ok);
+
+  // Decompress twice onto the same output: same rule.
+  Job back;
+  back.mode = Mode::Decompress;
+  back.input = arc;
+  back.output = out;
+  CHECK(run_job(back).ok);
+  Result back_again = run_job(back);
+  CHECK(!back_again.ok);
+  CHECK(back_again.error.find("already exists") != std::string::npos);
+  back.force = true;
+  Result forced = run_job(back);
+  CHECK(forced.ok);
+  CHECK(forced.stats.verified);
+}
+
+KOLMA_TEST(decompress_refuses_a_dangling_symlink_output) {
+  const std::string dir = round_trip_dir();
+  const std::string in = dir + "/symlink.in";
+  const std::string arc = dir + "/symlink.kolma";
+  kolma_test::write_bytes(in, kolma_test::make_repetitive(10000));
+  Job job;
+  job.mode = Mode::Compress;
+  job.input = in;
+  job.output = arc;
+  job.algorithm = "lz77";
+  CHECK(run_job(job).ok);
+
+  // A dangling symlink: stat() says "missing" but open() would create the
+  // target. The refusal must use symlink_status, not status.
+  const std::string link = dir + "/symlink-link.out";
+  const std::string target = dir + "/symlink-target.out";
+  std::filesystem::remove(link);
+  std::filesystem::create_symlink(target, link);
+  Job back;
+  back.mode = Mode::Decompress;
+  back.input = arc;
+  back.output = link;
+  Result r = run_job(back);
+  CHECK(!r.ok);
+  CHECK(r.error.find("already exists") != std::string::npos);
+  CHECK(!std::filesystem::exists(target));  // never created through the link
+}
+
+KOLMA_TEST(compress_rejects_an_oversized_chunk_size) {
+  const std::string in = round_trip_dir() + "/bigchunk.in";
+  kolma_test::write_bytes(in, kolma_test::make_repetitive(10000));
+  Job job;
+  job.mode = Mode::Compress;
+  job.input = in;
+  job.output = round_trip_dir() + "/bigchunk.kolma";
+  job.algorithm = "lz77";
+  job.chunk_size = size_t(kMaxChunkSize) + 1;
+  Result r = run_job(job);
+  CHECK(!r.ok);
+  CHECK(r.error.find("64 MiB") != std::string::npos);
 }

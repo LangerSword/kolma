@@ -297,6 +297,7 @@ KOLMA_TEST(unsafe_source_names_never_become_output_paths) {
     Job back;
     back.mode = Mode::Decompress;
     back.input = path;
+    back.force = true;  // the fallback output is reused across iterations
     Result r = run_job(back);
     CHECK(r.ok);
     CHECK_EQ(r.stats.output_path, path + ".out");  // fell back, did not escape

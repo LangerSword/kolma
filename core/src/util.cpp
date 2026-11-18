@@ -5,6 +5,8 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "kolma/algorithm.hpp"  // FormatError
+
 namespace kolma {
 
 // ------------------------------------------------------------------ CRC-32 ---
@@ -288,7 +290,11 @@ void chacha20_xor(View key, uint32_t counter, View nonce, View input, uint8_t* o
   while (off < input.size()) {
     chacha20_block(state, keystream);
     ++state[12];
-    if (state[12] == 0) ++state[13];  // carry, never triggered below 256 GiB
+    // RFC 8439: the 32-bit block counter must not wrap under one nonce. With
+    // kolma's 64 MiB chunk cap this is unreachable (2^20 blocks), but the
+    // invariant is enforced, not assumed.
+    if (state[12] == 0)
+      throw FormatError("chacha20: block counter overflow (input too large for one nonce)");
     size_t take = std::min<size_t>(64, input.size() - off);
     for (size_t i = 0; i < take; ++i) output[off + i] = uint8_t(input[off + i] ^ keystream[i]);
     off += take;

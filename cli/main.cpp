@@ -52,6 +52,8 @@ struct Options {
   bool quiet = false;
   bool no_check = false;
   bool verify = true;
+  bool force = false;
+  bool password_flag = false;
   std::string algorithm = "auto";
   std::string priority = "balanced";
   std::string output;
@@ -108,6 +110,8 @@ Options parse_options(int argc, char** argv, int start) {
       o.no_check = true;
     } else if (arg == "--no-verify") {
       o.verify = false;
+    } else if (arg == "--force" || arg == "-f") {
+      o.force = true;
     } else if (arg == "--algo" || arg == "-a") {
       o.algorithm = value_of("--algo");
     } else if (arg == "--priority" || arg == "-p") {
@@ -116,6 +120,7 @@ Options parse_options(int argc, char** argv, int start) {
       o.output = value_of("--out");
     } else if (arg == "--password") {
       o.password = value_of("--password");
+      o.password_flag = true;
     } else if (arg == "--level" || arg == "-l") {
       std::string v = value_of("--level");
       if (v.empty()) continue;
@@ -129,6 +134,8 @@ Options parse_options(int argc, char** argv, int start) {
     } else if (arg == "--chunk-size") {
       std::string v = value_of("--chunk-size");
       if (!v.empty() && !parse_size(v, o.chunk_size)) o.error = "--chunk-size expects a size (e.g. 1M)";
+      if (o.error.empty() && o.chunk_size > (64ll << 20))
+        o.error = "--chunk-size exceeds the 64 MiB maximum";
     } else if (arg == "--memory-limit") {
       std::string v = value_of("--memory-limit");
       if (!v.empty() && !parse_size(v, o.memory_limit)) o.error = "--memory-limit expects a size";
@@ -166,12 +173,13 @@ void print_usage(std::ostream& os) {
      << "  -a, --algo <id>        store | rle | huffman | lz77 | lzw | bwt-mtf-ari | delta-rle | auto\n"
      << "  -l, --level <1-9>      effort; 1 = fastest, 9 = best ratio\n"
      << "  -p, --priority <p>     maxratio | balanced | maxspeed (used when --algo is auto)\n"
-     << "  -o, --out <path>       output path\n"
+     << "  -o, --out <path>       output path (existing files are refused unless --force)\n"
      << "      --password <pw>    encrypt (visible in ps; prefer KOLMA_PASSWORD)\n"
      << "  -t, --threads <n>      worker threads (default: hardware concurrency)\n"
-     << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes\n"
+     << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes (max 64M)\n"
      << "      --memory-limit <s> working-set ceiling (default 256M)\n"
      << "      --no-verify        skip the checksum check on decompression\n"
+     << "  -f, --force            overwrite an existing output file\n"
      << "      --json             machine-readable progress and result\n"
      << "  -q, --quiet            suppress the progress line\n";
 }
@@ -330,6 +338,10 @@ int main(int argc, char** argv) {
     std::cerr << "kolma: " << o.error << "\n";
     return 2;
   }
+  if (o.password_flag) {
+    std::cerr << "kolma: warning: --password is visible in process listings; "
+                 "prefer the KOLMA_PASSWORD environment variable\n";
+  }
 
   auto progress = [&](const kolma::Progress& p) {
     if (o.json)
@@ -447,6 +459,7 @@ int main(int argc, char** argv) {
   job.chunk_size = size_t(std::max(0ll, o.chunk_size));
   job.memory_limit = size_t(std::max(0ll, o.memory_limit));
   job.verify = o.verify;
+  job.force = o.force;
 
   kolma::Result r = kolma::run_job(job, progress);
   if (!r.ok) return finish(r, o, false);
