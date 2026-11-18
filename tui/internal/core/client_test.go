@@ -418,3 +418,23 @@ func TestHumanSize(t *testing.T) {
 		}
 	}
 }
+
+func TestForceFlagReachesTheEngine(t *testing.T) {
+	req := RunRequest{Input: "x.txt", Force: true}
+	args := req.args("compress")
+	found := false
+	for _, a := range args {
+		if a == "--force" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("--force missing from %v", args)
+	}
+	plain := RunRequest{Input: "x.txt"}.args("compress")
+	for _, a := range plain {
+		if a == "--force" {
+			t.Fatalf("--force must be opt-in, got %v", plain)
+		}
+	}
+}

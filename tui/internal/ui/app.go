@@ -6,9 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/progress"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LangerSword/kolma/tui/internal/core"
 )
@@ -101,10 +105,18 @@ type Model struct {
 	result     core.Result
 	progressCh chan core.Progress
 
+	// pendingForce implements the overwrite confirmation: the first attempt
+	// refuses an existing output, the next c/d press confirms with --force.
+	pendingForce bool
+
 	archive    *core.ArchiveInfo
 	archiveErr string
 
 	bench []core.BenchmarkRow
+
+	spinner spinner.Model
+	bar     progress.Model
+	vp      viewport.Model
 
 	version string
 }
@@ -123,6 +135,15 @@ func New(client core.Client, version string) Model {
 	password.Prompt = ""
 	password.EchoMode = textinput.EchoPassword
 
+	sp := spinner.New(spinner.WithSpinner(spinner.MiniDot),
+		spinner.WithStyle(lipgloss.NewStyle().Foreground(accent)))
+	bar := progress.New(
+		progress.WithSolidFill(string(accent)),
+		progress.WithFillCharacters('█', '─'),
+		progress.WithoutPercentage(),
+		progress.WithWidth(40),
+	)
+
 	cwd, err := os.Getwd()
 	if err != nil {
 		cwd = "."
@@ -139,6 +160,9 @@ func New(client core.Client, version string) Model {
 		chunkIdx: 0,
 		version:  version,
 		inputs:   [2]textinput.Model{output, password},
+		spinner:  sp,
+		bar:      bar,
+		vp:       viewport.New(100, 27),
 	}
 	m.refresh()
 	return m
@@ -206,14 +230,26 @@ func (m Model) chunkText() string {
 	return core.HumanSize(uint64(c))
 }
 
+// defaultOutput is what the engine will derive when no explicit path is set:
+// <input>.kolma for compression, the stripped name for an archive.
+func (m Model) defaultOutput() string {
+	if m.target.Name == "" {
+		return "(no file selected)"
+	}
+	if m.target.IsArchive {
+		if strings.HasSuffix(m.target.Path, ".kolma") {
+			return strings.TrimSuffix(m.target.Path, ".kolma")
+		}
+		return m.target.Path + ".out"
+	}
+	return m.target.Path + ".kolma"
+}
+
 func (m Model) outputText() string {
 	if v := strings.TrimSpace(m.inputs[0].Value()); v != "" {
 		return v
 	}
-	if m.target.Name == "" {
-		return "(no file selected)"
-	}
-	return m.target.Path + ".kolma"
+	return m.defaultOutput()
 }
 
 func (m Model) passwordSet() bool { return m.inputs[1].Value() != "" }
@@ -223,13 +259,10 @@ func (m *Model) setStatus(msg string, isErr bool) {
 	m.statusErr = isErr
 }
 
-func (m Model) visibleRows() int {
-	rows := m.height - 12
-	if rows < 3 {
-		rows = 3
-	}
-	return rows
-}
+// contentHeight is the space between the header line and the status/key bars.
+func (m Model) contentHeight() int { return max(3, m.height-3) }
+
+func (m Model) visibleRows() int { return max(3, m.contentHeight()-2) }
 
 func (m Model) windowOffset() int {
 	rows := m.visibleRows()
@@ -239,18 +272,12 @@ func (m Model) windowOffset() int {
 	return m.cursor - rows + 1
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
+func (m Model) shortVersion() string {
+	fields := strings.Fields(m.version)
+	if len(fields) >= 2 {
+		return fields[0] + " " + fields[1]
 	}
-	return b
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return m.version
 }
 
 // --------------------------------------------------------------------- update
@@ -260,7 +287,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.vp.Width = msg.Width
+		m.vp.Height = m.contentHeight()
+		for i := range m.inputs {
+			m.inputs[i].Width = min(48, max(10, msg.Width-22))
+		}
+		m.bar.Width = min(60, max(10, msg.Width-12))
 		return m, nil
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		if !m.analyzing && !m.running {
+			cmd = nil // stop the chain when there is nothing to wait for
+		}
+		return m, cmd
 
 	case algosMsg:
 		if msg.err == nil {
@@ -305,6 +346,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.archiveErr = ""
 		m.archive = &msg.info
+		m.vp.GotoTop()
 		return m, nil
 
 	case resultMsg:
@@ -313,20 +355,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.running = false
 		m.result = msg.res
+		if msg.kind == "benchmark" {
+			m.bench = msg.res.Benchmark
+		}
 		if msg.err != nil {
 			m.setStatus(msg.err.Error(), true)
 		} else if !msg.res.OK {
-			m.setStatus(msg.res.Error, true)
+			if strings.Contains(msg.res.Error, "already exists") {
+				m.pendingForce = true
+				m.setStatus("output exists — press c or d again to overwrite", true)
+			} else {
+				m.setStatus(msg.res.Error, true)
+			}
 		} else {
-			m.setStatus(fmt.Sprintf("%s finished: ratio %.4f", msg.kind, msg.res.Stats.Ratio), false)
+			if msg.kind == "benchmark" && len(msg.res.Benchmark) > 0 {
+				best := msg.res.Benchmark[0]
+				m.setStatus(fmt.Sprintf("benchmark finished: best ratio %.4f (%s)", best.Ratio, best.Algo), false)
+			} else {
+				m.setStatus(fmt.Sprintf("%s finished: ratio %.4f", msg.kind, msg.res.Stats.Ratio), false)
+			}
 			m.refresh()
 		}
+		m.vp.GotoTop()
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if m.screen == screenBrowse {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			m.cursor = max(0, m.cursor-3)
+		case tea.MouseButtonWheelDown:
+			m.cursor = min(len(m.entries)-1, m.cursor+3)
+		case tea.MouseButtonLeft:
+			if msg.Action == tea.MouseActionPress {
+				// Row 0 is the header, row 1 the panel's top border.
+				idx := m.windowOffset() + msg.Y - 2
+				if idx >= 0 && idx < len(m.entries) {
+					m.cursor = idx
+				}
+			}
+		}
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.vp, cmd = m.vp.Update(msg)
+	return m, cmd
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -335,12 +417,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// A text field owns the keyboard while it is being edited.
 	if m.editing >= 0 {
 		switch key {
-		case "esc":
-			m.editing = -1
-			m.inputs[0].Blur()
-			m.inputs[1].Blur()
-			return m, nil
-		case "enter":
+		case "esc", "enter":
 			m.editing = -1
 			m.inputs[0].Blur()
 			m.inputs[1].Blur()
@@ -363,28 +440,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.helpReturn = m.screen
 			m.screen = screenHelp
+			m.status = ""
+			m.statusErr = false
 		}
+		m.vp.GotoTop()
 		return m, nil
-	case "esc":
-		if m.screen == screenHelp {
-			m.screen = m.helpReturn
-			return m, nil
-		}
 	case "q":
 		// Quitting is always available; esc is the key that walks back.
 		return m, tea.Quit
+	case "esc":
+		if m.screen == screenHelp {
+			m.screen = m.helpReturn
+			m.vp.GotoTop()
+			return m, nil
+		}
 	}
 
 	switch m.screen {
 	case screenBrowse:
 		return m.browseKey(key)
 	case screenInspect:
+		// Settings keys own the letters; the arrows and page keys scroll.
+		switch key {
+		case "up", "down", "pgup", "pgdown", "home", "end", "ctrl+u", "ctrl+d":
+			var cmd tea.Cmd
+			m.vp, cmd = m.vp.Update(msg)
+			return m, cmd
+		}
 		return m.inspectKey(key)
 	case screenRun, screenInfo, screenBench:
 		if key == "esc" {
 			m.screen = screenInspect
+			m.vp.GotoTop()
 			return m, nil
 		}
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
+	case screenHelp:
+		var cmd tea.Cmd
+		m.vp, cmd = m.vp.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -427,7 +523,7 @@ func (m Model) browseKey(key string) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.selectTarget(entry)
-		return m, m.analyzeCmd(entry.Path)
+		return m, tea.Batch(m.analyzeCmd(entry.Path), m.spinner.Tick)
 	}
 	return m, nil
 }
@@ -442,7 +538,11 @@ func (m *Model) selectTarget(entry core.Entry) {
 	m.archive = nil
 	m.archiveErr = ""
 	m.bench = nil
+	m.pendingForce = false
+	m.status = ""
+	m.statusErr = false
 	m.runID++
+	m.vp.GotoTop()
 }
 
 func (m Model) analyzeCmd(path string) tea.Cmd {
@@ -459,6 +559,8 @@ func (m Model) inspectKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
 	case "esc":
 		m.screen = screenBrowse
+		m.status = ""
+		m.statusErr = false
 		return m, nil
 	case "a", "right":
 		if m.algoIdx < len(m.algos) {
@@ -482,7 +584,8 @@ func (m Model) inspectKey(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "p":
 		m.priority = (m.priority + 1) % len(priorities)
-		return m, m.analyzeCmd(m.target.Path)
+		m.analyzing = true
+		return m, tea.Batch(m.analyzeCmd(m.target.Path), m.spinner.Tick)
 	case "t":
 		m.threads++
 		return m, nil
@@ -516,15 +619,11 @@ func (m *Model) startEditing(which int) {
 	m.editing = which
 	m.inputs[which].Focus()
 	if which == 0 && m.inputs[0].Value() == "" {
-		m.inputs[0].SetValue(m.target.Path + ".kolma")
+		m.inputs[0].SetValue(m.defaultOutput())
 	}
 }
 
 func (m Model) runRequest() core.RunRequest {
-	chunk := chunkChoices[m.chunkIdx]
-	if chunk == 0 {
-		chunk = 0
-	}
 	return core.RunRequest{
 		Input:     m.target.Path,
 		Output:    strings.TrimSpace(m.inputs[0].Value()),
@@ -533,7 +632,7 @@ func (m Model) runRequest() core.RunRequest {
 		Priority:  priorities[m.priority],
 		Password:  m.inputs[1].Value(),
 		Threads:   m.threads,
-		ChunkSize: chunk,
+		ChunkSize: chunkChoices[m.chunkIdx],
 	}
 }
 
@@ -547,11 +646,18 @@ func (m Model) startRun(kind string) (tea.Model, tea.Cmd) {
 	m.runKind = kind
 	m.progress = core.Progress{}
 	m.result = core.Result{}
+	m.status = ""
+	m.statusErr = false
 	m.screen = screenRun
+	m.vp.GotoTop()
 	m.progressCh = make(chan core.Progress, 64)
 
 	client := m.client
 	req := m.runRequest()
+	if m.pendingForce {
+		req.Force = true // the user pressed c/d a second time: confirmed
+		m.pendingForce = false
+	}
 	ch := m.progressCh
 	runID := m.runID
 	report := func(p core.Progress) {
@@ -575,7 +681,7 @@ func (m Model) startRun(kind string) (tea.Model, tea.Cmd) {
 			return resultMsg{runID: runID, kind: "decompression", res: res, err: err}
 		}
 	}
-	return m, tea.Batch(work, m.waitProgress(runID))
+	return m, tea.Batch(work, m.waitProgress(runID), m.spinner.Tick)
 }
 
 func (m Model) waitProgress(runID int) tea.Cmd {
@@ -597,7 +703,10 @@ func (m Model) startBench() (tea.Model, tea.Cmd) {
 	m.running = true
 	m.runKind = "benchmark"
 	m.bench = nil
+	m.status = ""
+	m.statusErr = false
 	m.screen = screenBench
+	m.vp.GotoTop()
 	m.progressCh = make(chan core.Progress, 64)
 
 	client := m.client
@@ -616,111 +725,186 @@ func (m Model) startBench() (tea.Model, tea.Cmd) {
 		close(ch)
 		return resultMsg{runID: runID, kind: "benchmark", res: res, err: err}
 	}
-	return m, tea.Batch(work, m.waitProgress(runID))
+	return m, tea.Batch(work, m.waitProgress(runID), m.spinner.Tick)
 }
 
 func (m Model) startInfo() (tea.Model, tea.Cmd) {
 	m.runID++
 	m.running = true
+	m.status = ""
+	m.statusErr = false
 	m.screen = screenInfo
+	m.vp.GotoTop()
 	client := m.client
 	path := m.target.Path
 	runID := m.runID
-	return m, func() tea.Msg {
+	return m, tea.Batch(func() tea.Msg {
 		info, err := client.Info(path)
 		return infoMsg{runID: runID, info: info, err: err}
-	}
+	}, m.spinner.Tick)
 }
 
 // ----------------------------------------------------------------------- view
 
 func (m Model) View() string {
-	var b strings.Builder
-	switch m.screen {
-	case screenBrowse:
-		b.WriteString(m.viewBrowse())
-	case screenInspect:
-		b.WriteString(m.viewInspect())
-	case screenRun:
-		b.WriteString(m.viewRun())
-	case screenInfo:
-		b.WriteString(m.viewInfo())
-	case screenBench:
-		b.WriteString(m.viewBench())
-	case screenHelp:
-		b.WriteString(m.viewHelp())
-	}
-	if m.status != "" {
-		style := accentValueStyle
-		if m.statusErr {
-			style = badStyle
-		}
-		b.WriteString("\n" + style.Render(truncate(m.status, m.width-2)) + "\n")
+	width := max(20, m.width)
+	head := header(m.screenName(), m.breadcrumb(), m.shortVersion(), width)
+
+	var body string
+	overflow := false
+	if m.screen == screenBrowse {
+		body = m.viewBrowse()
 	} else {
-		b.WriteString("\n")
+		content := m.screenContent()
+		vp := m.vp
+		vp.Width = width
+		vp.Height = m.contentHeight()
+		vp.SetContent(content)
+		body = vp.View()
+		overflow = len(strings.Split(content, "\n")) > m.contentHeight()
 	}
-	b.WriteString(m.footerFor())
-	return b.String()
+
+	status := ""
+	if m.status != "" {
+		badge := okBadge.Render("✓")
+		if m.statusErr {
+			badge = errBadge.Render("✗")
+		}
+		status = badge + " " + clip(sanitize(m.status), width-3)
+	}
+	hints := m.keyHintsFor()
+	if overflow && m.screen == screenInspect {
+		// Scrolling is essential when content overflows: give the hint a
+		// priority slot so narrow terminals keep it.
+		hints = append(hints[:2], append([]string{keyHint("↑↓", "scroll")}, hints[2:]...)...)
+	}
+	keys := fitKeyBar(hints, width)
+	return head + "\n" + body + "\n" + status + "\n" + keys
 }
 
-func truncate(s string, width int) string {
-	if width <= 0 || len(s) <= width {
-		return s
-	}
-	if width <= 1 {
-		return s[:width]
-	}
-	return s[:width-1] + "…"
-}
-
-func (m Model) footerFor() string {
+func (m Model) screenName() string {
 	switch m.screen {
 	case screenBrowse:
-		return footer("↑/↓ move · enter open · backspace up · . hidden · r refresh · q quit")
+		return "browse"
 	case screenInspect:
-		return footer("a/A algorithm · [ ] level · p priority · t/T threads · k chunk · o output · w password · c compress · d decompress · b bench · i info · esc back")
+		return "inspect"
 	case screenRun:
-		return footer("esc back to the file")
-	case screenInfo, screenBench:
-		return footer("esc back")
+		return m.runKind
+	case screenInfo:
+		return "archive"
+	case screenBench:
+		return "benchmark"
 	case screenHelp:
-		return footer("? or esc to close · q to quit")
+		return "help"
 	}
 	return ""
 }
 
-func (m Model) viewBrowse() string {
-	var b strings.Builder
-	b.WriteString(header("browse", m.cwd) + "\n\n")
+func (m Model) breadcrumb() string {
+	if m.screen == screenBrowse {
+		return m.cwd
+	}
+	return m.target.Path
+}
 
+// keyHintsFor lists the screen's hints in priority order: fitKeyBar keeps as
+// many as fit, so narrow terminals lose the least important hints first.
+func (m Model) keyHintsFor() []string {
+	switch m.screen {
+	case screenBrowse:
+		return []string{keyHint("↑↓", "move"), keyHint("enter", "open"), keyHint("?", "help"),
+			keyHint("q", "quit"), keyHint("bksp", "up"), keyHint(".", "hidden"), keyHint("r", "refresh")}
+	case screenInspect:
+		return []string{keyHint("c", "compress"), keyHint("d", "decompress"), keyHint("esc", "back"),
+			keyHint("?", "keys"), keyHint("b", "bench"), keyHint("i", "info"),
+			keyHint("o", "output"), keyHint("w", "password")}
+	case screenRun, screenInfo, screenBench:
+		return []string{keyHint("esc", "back"), keyHint("↑↓", "scroll"), keyHint("q", "quit")}
+	case screenHelp:
+		return []string{keyHint("?/esc", "close"), keyHint("q", "quit")}
+	}
+	return nil
+}
+
+func fitKeyBar(hints []string, width int) string {
+	sep := dimStyle.Render("  ·  ")
+	sepW := ansi.StringWidth(sep)
+	var kept []string
+	used := 0
+	for _, h := range hints {
+		add := ansi.StringWidth(h)
+		if len(kept) > 0 {
+			add += sepW
+		}
+		if used+add > width {
+			break
+		}
+		kept = append(kept, h)
+		used += add
+	}
+	return strings.Join(kept, sep)
+}
+
+func (m Model) screenContent() string {
+	switch m.screen {
+	case screenInspect:
+		return m.viewInspect()
+	case screenRun:
+		return m.viewRun()
+	case screenInfo:
+		return m.viewInfo()
+	case screenBench:
+		return m.viewBench()
+	case screenHelp:
+		return m.viewHelp()
+	}
+	return ""
+}
+
+// -------------------------------------------------------------------- browse
+
+func (m Model) viewBrowse() string {
 	rows := m.visibleRows()
 	offset := m.windowOffset()
+	inner := max(16, max(20, m.width)-4)
+	nameW := max(8, inner-2-4-1-10-1)
+
+	lines := make([]string, 0, rows)
 	if len(m.entries) == 0 {
-		b.WriteString(dimStyle.Render("  (empty directory)") + "\n")
+		lines = append(lines, dimStyle.Render("(empty directory)"))
 	}
 	for i := offset; i < len(m.entries) && i < offset+rows; i++ {
 		entry := m.entries[i]
-		marker := "  "
-		if i == m.cursor {
-			marker = cursorStyle.Render("> ")
-		}
+		name := sanitize(entry.Name)
 		kind := "file"
 		if entry.IsDir {
 			kind = "dir "
+			name += "/"
 		} else if entry.IsArchive {
 			kind = "arc "
 		}
 		size := core.HumanSize(uint64(max64(entry.Size)))
-		line := fmt.Sprintf("%s%-4s %-44s %10s", marker, kind, truncate(entry.Name, 44), size)
+		nameClipped := padRight(clip(name, nameW), nameW)
 		if i == m.cursor {
-			line = selectedStyle.Render(fmt.Sprintf("%s %-4s %-44s %10s", ">", kind, truncate(entry.Name, 44), size))
+			raw := fmt.Sprintf("▸ %s %s %s", kind, nameClipped, padLeft(size, 10))
+			lines = append(lines, selectedStyle.Render(padRight(raw, inner)))
+			continue
 		}
-		b.WriteString(line + "\n")
+		kindStyled := dimStyle.Render(kind)
+		nameStyled := textStyle.Render(nameClipped)
+		if entry.IsDir {
+			kindStyled = accentStyle.Render(kind)
+			nameStyled = accentStyle.Render(nameClipped)
+		} else if entry.IsArchive {
+			kindStyled = warnStyle.Render(kind)
+		}
+		lines = append(lines, fmt.Sprintf("  %s %s %s", kindStyled, nameStyled, dimStyle.Render(padLeft(size, 10))))
 	}
-	if len(m.entries) > rows {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  %d/%d", m.cursor+1, len(m.entries))) + "\n")
+	right := ""
+	if len(m.entries) > 0 {
+		right = fmt.Sprintf("%d/%d", m.cursor+1, len(m.entries))
 	}
-	return b.String()
+	return panel("browse", right, strings.Join(lines, "\n"), max(20, m.width), m.contentHeight(), true)
 }
 
 func max64(v int64) int64 {
@@ -730,242 +914,367 @@ func max64(v int64) int64 {
 	return v
 }
 
-func (m Model) viewInspect() string {
-	var b strings.Builder
-	b.WriteString(header("inspect", m.target.Path) + "\n\n")
+// ratioBar renders "0.3671 ████▌···········": the number plus a 16-cell bar
+// with sub-cell precision (fractional block glyphs), scaled so the worst
+// ratio fills the track. Lower ratio = shorter bar = better compression.
+func ratioBar(ratio, maxRatio float64) string {
+	const cells = 16
+	frac := []rune{'▏', '▎', '▍', '▌', '▋', '▊', '▉'}
+	used := 0.0
+	if maxRatio > 0 {
+		used = ratio / maxRatio * cells
+	}
+	if used > cells {
+		used = cells
+	}
+	full := int(used)
+	rest := int((used - float64(full)) * 8)
+	bar := strings.Repeat("█", full)
+	if rest > 0 && full < cells {
+		bar += string(frac[rest-1])
+		full++
+	}
+	bar += strings.Repeat("·", cells-full)
+	return padRight(fmt.Sprintf("%7.4f ", ratio)+bar, 24)
+}
 
-	// --- the Analyzer's verdict
-	b.WriteString(accentValueStyle.Render("analyzer") + "\n")
+// ------------------------------------------------------------------- inspect
+
+func (m Model) viewInspect() string {
+	width := max(20, m.width)
+	wide := width >= 100
+	leftW, rightW := width, width
+	if wide {
+		leftW = width/2 - 1
+		rightW = width - leftW - 2
+	}
+	aInner := leftW - 4  // the analyzer panel's real inner width
+	sInner := rightW - 4 // the settings panel's real inner width
+
+	var a strings.Builder
 	if m.analyzing {
-		b.WriteString(dimStyle.Render("  sampling and trialling algorithms…") + "\n")
+		a.WriteString("  " + m.spinner.View() + " " + dimStyle.Render("sampling and trialling…"))
 	} else if m.analyzeErr != "" {
-		b.WriteString(badStyle.Render("  "+truncate(m.analyzeErr, m.width-4)) + "\n")
+		a.WriteString("  " + badStyle.Render(clip(sanitize(m.analyzeErr), aInner-2)))
 	} else {
-		a := m.analysis
-		row := func(label, value string) string {
-			return "  " + labelStyle.Render(label) + valueStyle.Render(value) + "\n"
+		an := m.analysis
+		a.WriteString(row("size", core.HumanSize(an.Size), "", aInner) + "\n")
+		a.WriteString(row("type", fmt.Sprintf("%s (%s)", an.Type, sanitize(an.TypeDetail)), "", aInner) + "\n")
+		a.WriteString(row("entropy", fmt.Sprintf("%.4f bits/byte", an.Entropy), "", aInner) + "\n")
+		a.WriteString(row("compressible", fmt.Sprintf("%.1f%%", an.Compressibility*100), "", aInner) + "\n")
+		verdict := an.RecommendedAlgo
+		if an.StoreRaw {
+			verdict += "  (stored raw)"
 		}
-		b.WriteString(row("size", core.HumanSize(a.Size)))
-		b.WriteString(row("type", fmt.Sprintf("%s (%s)", a.Type, a.TypeDetail)))
-		b.WriteString(row("entropy", fmt.Sprintf("%.4f bits/byte", a.Entropy)))
-		b.WriteString(row("compressible", fmt.Sprintf("%.1f%%", a.Compressibility*100)))
-		verdict := a.RecommendedAlgo
-		if a.StoreRaw {
-			verdict += "  (flagged incompressible: stored raw)"
-		}
-		b.WriteString(row("recommends", verdict))
-		if len(a.Trials) > 0 {
-			b.WriteString("  " + dimStyle.Render("sample trials:") + "\n")
-			for _, t := range a.Trials {
-				b.WriteString(fmt.Sprintf("    %-14s ratio %-9.4f %8.2f ms\n", t.Algo, t.Ratio, t.ElapsedMS))
+		a.WriteString(row("recommends", accentStyle.Render(verdict), "", aInner) + "\n")
+		if len(an.Trials) > 0 {
+			a.WriteString("  " + dimStyle.Render("sample trials") + "\n")
+			best := an.Trials[0].Ratio
+			for _, t := range an.Trials {
+				if t.Ratio < best {
+					best = t.Ratio
+				}
+			}
+			for _, t := range an.Trials {
+				line := fmt.Sprintf("    %-12s %7.4f %8.2f ms", t.Algo, t.Ratio, t.ElapsedMS)
+				if t.Ratio == best {
+					line = accentStyle.Render(line)
+				} else {
+					line = subtleStyle.Render(line)
+				}
+				a.WriteString(clip(line, aInner) + "\n")
 			}
 		}
-		if a.Rationale != "" {
-			b.WriteString("  " + dimStyle.Render(truncate(a.Rationale, m.width-4)) + "\n")
+		if an.Rationale != "" {
+			// Wrap to the panel's own width, at word boundaries.
+			wrapped := ansi.Wordwrap(sanitize(an.Rationale), max(10, aInner-4), "")
+			for _, ln := range strings.Split(wrapped, "\n") {
+				a.WriteString("  " + dimStyle.Render(ln) + "\n")
+			}
 		}
 	}
 
-	// --- the User's settings
-	b.WriteString("\n" + accentValueStyle.Render("settings") + "\n")
-	setting := func(label, value string) string {
-		return "  " + labelStyle.Render(label) + valueStyle.Render(value) + "\n"
-	}
-	b.WriteString(setting("algorithm", m.algoName()))
-	b.WriteString(setting("level", m.levelText()))
-	b.WriteString(setting("priority", priorities[m.priority]))
-	b.WriteString(setting("threads", m.threadsText()))
-	b.WriteString(setting("chunk size", m.chunkText()))
+	var s strings.Builder
+	s.WriteString(row("algorithm", m.algoName(), "a/A", sInner) + "\n")
+	s.WriteString(row("level", m.levelText(), "[ ]", sInner) + "\n")
+	s.WriteString(row("priority", priorities[m.priority], "p", sInner) + "\n")
+	s.WriteString(row("threads", m.threadsText(), "t/T", sInner) + "\n")
+	s.WriteString(row("chunk size", m.chunkText(), "k", sInner) + "\n")
 	if m.editing == 0 {
-		b.WriteString("  " + labelStyle.Render("output") + m.inputs[0].View() + "\n")
+		s.WriteString(clip("  "+labelStyle.Render("output")+m.inputs[0].View(), sInner) + "\n")
 	} else {
-		b.WriteString(setting("output", truncate(m.outputText(), m.width-20)))
+		s.WriteString(row("output", clipLeft(sanitize(m.outputText()), sInner-20), "o", sInner) + "\n")
 	}
 	if m.editing == 1 {
-		b.WriteString("  " + labelStyle.Render("password") + m.inputs[1].View() + "\n")
+		s.WriteString(clip("  "+labelStyle.Render("password")+m.inputs[1].View(), sInner) + "\n")
 	} else {
-		state := "(none: the archive will not be encrypted)"
+		state := dimStyle.Render("(none — not encrypted)")
 		if m.passwordSet() {
-			state = "set (ChaCha20 + PBKDF2-HMAC-SHA256)"
+			state = accentStyle.Render("set") + dimStyle.Render(" · ChaCha20 + HMAC")
 		}
-		b.WriteString(setting("password", state))
+		s.WriteString(row("password", state, "w", sInner) + "\n")
 	}
-	return b.String()
+
+	aContent := strings.TrimSuffix(a.String(), "\n")
+	sContent := strings.TrimSuffix(s.String(), "\n")
+
+	// Equalize the CONTENT heights so the two panels' bottom borders land on
+	// the same row (padding after the panel would just add dead space below).
+	ah := len(strings.Split(aContent, "\n"))
+	sh := len(strings.Split(sContent, "\n"))
+	if ah < sh {
+		aContent += strings.Repeat("\n", sh-ah)
+	} else if sh < ah {
+		sContent += strings.Repeat("\n", ah-sh)
+	}
+
+	if wide {
+		h := max(ah, sh) + 2
+		if h < m.contentHeight() {
+			h = m.contentHeight()
+		}
+		left := panel("analyzer", "", aContent, leftW, h, false)
+		right := panel("settings", "", sContent, rightW, h, m.editing >= 0)
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, "  ", right)
+	}
+	return panelAuto("analyzer", "", aContent, width, false) + "\n" +
+		panelAuto("settings", "", sContent, width, m.editing >= 0)
 }
+
+// ----------------------------------------------------------------------- run
 
 func (m Model) viewRun() string {
-	var b strings.Builder
-	b.WriteString(header(m.runKind, m.target.Path) + "\n\n")
+	width := max(20, m.width)
+	inner := width - 4
 	p := m.progress
-	bar := progressBar(p.ChunksDone, p.ChunksTotal, min(60, m.width-10))
-	b.WriteString("  " + bar + "\n\n")
-	row := func(label, value string) string {
-		return "  " + labelStyle.Render(label) + valueStyle.Render(value) + "\n"
+	pct := 0.0
+	if p.ChunksTotal > 0 {
+		pct = float64(p.ChunksDone) / float64(p.ChunksTotal)
 	}
-	b.WriteString(row("progress", fmt.Sprintf("%d/%d chunks", p.ChunksDone, p.ChunksTotal)))
-	b.WriteString(row("input", core.HumanSize(p.BytesIn)))
-	b.WriteString(row("output", core.HumanSize(p.BytesOut)))
-	b.WriteString(row("ratio", fmt.Sprintf("%.4f", p.Ratio)))
-	b.WriteString(row("throughput", core.HumanRate(p.ThroughputMBps)))
-	b.WriteString(row("elapsed", fmt.Sprintf("%.1f ms", p.ElapsedMS)))
+
+	var b strings.Builder
+	if m.running {
+		b.WriteString("  " + m.spinner.View() + " " + dimStyle.Render(m.runKind+"ing…") + "\n")
+	}
+	b.WriteString("  " + m.bar.ViewAs(pct) + fmt.Sprintf(" %5.1f%%", pct*100) + "\n")
+	if m.running {
+		b.WriteString("\n")
+		b.WriteString(row("progress", fmt.Sprintf("%d/%d chunks", p.ChunksDone, p.ChunksTotal), "", inner) + "\n")
+		b.WriteString(row("input", core.HumanSize(p.BytesIn), "", inner) + "\n")
+		b.WriteString(row("output", core.HumanSize(p.BytesOut), "", inner) + "\n")
+		b.WriteString(row("ratio", fmt.Sprintf("%.4f", p.Ratio), "", inner) + "\n")
+		b.WriteString(row("throughput", core.HumanRate(p.ThroughputMBps), "", inner) + "\n")
+		b.WriteString(row("elapsed", fmt.Sprintf("%.1f ms", p.ElapsedMS), "", inner) + "\n")
+	}
 
 	if !m.running && m.result.Stats.Algorithm != "" {
-		b.WriteString("\n" + accentValueStyle.Render("result") + "\n")
 		s := m.result.Stats
-		b.WriteString(row("algorithm", fmt.Sprintf("%s (%s) level %d", s.Algorithm, s.AlgorithmName, s.Level)))
-		b.WriteString(row("original", core.HumanSize(s.OrigSize)))
-		b.WriteString(row("compressed", core.HumanSize(s.CompSize)))
-		saved := "(1-ratio)*100"
+		b.WriteString("\n  " + accentStyle.Render("result") + "\n")
+		b.WriteString(row("algorithm", fmt.Sprintf("%s (%s) level %d", s.Algorithm, s.AlgorithmName, s.Level), "", inner) + "\n")
+		b.WriteString(row("original", core.HumanSize(s.OrigSize), "", inner) + "\n")
+		b.WriteString(row("compressed", core.HumanSize(s.CompSize), "", inner) + "\n")
+		saved := ""
 		if s.OrigSize > 0 {
-			saved = fmt.Sprintf("%.1f%% of the original saved", (1-s.Ratio)*100)
+			saved = fmt.Sprintf("  (%.1f%% saved)", (1-s.Ratio)*100)
 		}
-		b.WriteString(row("ratio", fmt.Sprintf("%.4f  %s", s.Ratio, saved)))
-		b.WriteString(row("chunks", fmt.Sprintf("%d x %s on %d threads", s.Chunks, core.HumanSize(s.ChunkSize), s.Threads)))
-		if s.RestoredCRC != "" {
-			state := "match"
+		b.WriteString(row("ratio", accentStyle.Render(fmt.Sprintf("%.4f", s.Ratio))+dimStyle.Render(saved), "", inner) + "\n")
+		b.WriteString(row("chunks", fmt.Sprintf("%d x %s on %d threads", s.Chunks, core.HumanSize(s.ChunkSize), s.Threads), "", inner) + "\n")
+		b.WriteString(row("throughput", core.HumanRate(s.ThroughputMBps), "", inner) + "\n")
+		b.WriteString(row("elapsed", fmt.Sprintf("%.1f ms", s.ElapsedMS), "", inner) + "\n")
+		if s.Restoring && s.RestoredCRC != "" {
+			state := okBadge.Render("✓ match")
 			if !s.Verified {
-				state = "MISMATCH"
+				state = errBadge.Render("✗ MISMATCH")
 			}
-			b.WriteString(row("checksum", fmt.Sprintf("%s -> %s %s", s.OrigCRC, s.RestoredCRC, state)))
+			b.WriteString(row("checksum", fmt.Sprintf("%s recorded → %s restored  %s", s.OrigCRC, s.RestoredCRC, state), "", inner) + "\n")
 		} else {
-			b.WriteString(row("checksum", s.OrigCRC+" recorded"))
+			b.WriteString(row("checksum", s.OrigCRC+" recorded in the header", "", inner) + "\n")
 		}
-		b.WriteString(row("encrypted", fmt.Sprintf("%v", s.Encrypted)))
-		b.WriteString(row("output", s.Output))
+		b.WriteString(row("encrypted", encryptionText(s.Encrypted, s.Authenticated), "", inner) + "\n")
+		b.WriteString(row("output", clipLeft(sanitize(s.Output), inner-18), "", inner) + "\n")
 	}
-	return b.String()
+	if !m.running && !m.result.OK && m.result.Error != "" {
+		b.WriteString("\n  " + badStyle.Render(clip(sanitize(m.result.Error), inner-2)) + "\n")
+		if m.pendingForce {
+			b.WriteString("  " + warnStyle.Render("press c or d again to overwrite") + "\n")
+		}
+	}
+	title := m.runKind
+	if title == "" {
+		title = "run"
+	}
+	return panelFill(title, sanitize(m.target.Name), strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), m.running)
 }
 
-func progressBar(done, total uint32, width int) string {
-	if width < 10 {
-		width = 10
+func encryptionText(encrypted, authenticated bool) string {
+	if !encrypted {
+		return dimStyle.Render("no")
 	}
-	filled := 0
-	if total > 0 {
-		filled = int(float64(done) / float64(total) * float64(width))
+	if authenticated {
+		return accentStyle.Render("yes") + dimStyle.Render(" · ChaCha20 + PBKDF2 · HMAC-SHA256 authenticated")
 	}
-	if filled > width {
-		filled = width
-	}
-	return accentValueStyle.Render(strings.Repeat("█", filled)) +
-		dimStyle.Render(strings.Repeat("░", width-filled)) +
-		fmt.Sprintf(" %5.1f%%", func() float64 {
-			if total == 0 {
-				return 0
-			}
-			return float64(done) / float64(total) * 100
-		}())
+	return warnStyle.Render("yes · legacy v1, NOT authenticated")
 }
+
+// ---------------------------------------------------------------------- info
 
 func (m Model) viewInfo() string {
+	width := max(20, m.width)
+	inner := width - 4
 	var b strings.Builder
-	b.WriteString(header("archive", m.target.Path) + "\n\n")
 	if m.running {
-		b.WriteString(dimStyle.Render("  reading the header and checksumming the payload…") + "\n")
-		return b.String()
+		b.WriteString("  " + m.spinner.View() + " " + dimStyle.Render("reading the header and checksumming the payload…"))
+		return panelFill("archive", sanitize(m.target.Name), b.String(), width, m.contentHeight(), true)
 	}
 	if m.archiveErr != "" {
-		b.WriteString(badStyle.Render("  "+truncate(m.archiveErr, m.width-4)) + "\n")
-		return b.String()
+		b.WriteString("  " + badStyle.Render(clip(sanitize(m.archiveErr), inner-2)))
+		return panelFill("archive", sanitize(m.target.Name), b.String(), width, m.contentHeight(), false)
 	}
 	if m.archive == nil {
-		return b.String()
+		return panelFill("archive", sanitize(m.target.Name), dimStyle.Render("  no archive read yet"), width, m.contentHeight(), false)
 	}
 	a := *m.archive
-	row := func(label, value string) string {
-		return "  " + labelStyle.Render(label) + valueStyle.Render(value) + "\n"
-	}
-	b.WriteString(row("version", fmt.Sprintf("%d", a.Version)))
-	b.WriteString(row("source", fmt.Sprintf("%s (%s / %s)", a.Source, a.Type, a.TypeDetail)))
-	b.WriteString(row("algorithm", fmt.Sprintf("%s (%s) level %d", a.Algorithm, a.AlgorithmName, a.Level)))
-	b.WriteString(row("original", core.HumanSize(a.OrigSize)))
-	b.WriteString(row("payload", core.HumanSize(a.CompSize)))
+	b.WriteString(row("version", fmt.Sprintf("%d", a.Version), "", inner) + "\n")
+	b.WriteString(row("source", fmt.Sprintf("%s (%s / %s)", sanitize(a.Source), a.Type, sanitize(a.TypeDetail)), "", inner) + "\n")
+	b.WriteString(row("algorithm", fmt.Sprintf("%s (%s) level %d", a.Algorithm, a.AlgorithmName, a.Level), "", inner) + "\n")
+	b.WriteString(row("original", core.HumanSize(a.OrigSize), "", inner) + "\n")
+	b.WriteString(row("payload", core.HumanSize(a.CompSize), "", inner) + "\n")
 	ratio := 1.0
 	if a.OrigSize > 0 {
 		ratio = float64(a.CompSize) / float64(a.OrigSize)
 	}
-	b.WriteString(row("ratio", fmt.Sprintf("%.4f", ratio)))
-	b.WriteString(row("chunks", fmt.Sprintf("%d x %s", a.ChunkCount, core.HumanSize(a.ChunkSize))))
-	b.WriteString(row("crc32", a.OrigCRC))
+	b.WriteString(row("ratio", fmt.Sprintf("%.4f", ratio), "", inner) + "\n")
+	b.WriteString(row("chunks", fmt.Sprintf("%d x %s", a.ChunkCount, core.HumanSize(a.ChunkSize)), "", inner) + "\n")
+	b.WriteString(row("crc32", a.OrigCRC, "", inner) + "\n")
 	if a.Encrypted {
-		b.WriteString(row("encrypted", fmt.Sprintf("yes (PBKDF2-HMAC-SHA256, %d iterations)", a.KDFIterations)))
+		enc := fmt.Sprintf("yes · PBKDF2-HMAC-SHA256, %d iterations", a.KDFIterations)
+		if a.Authenticated {
+			b.WriteString(row("encrypted", accentStyle.Render(enc+" · HMAC authenticated"), "", inner) + "\n")
+		} else {
+			b.WriteString(row("encrypted", warnStyle.Render(enc+" · legacy v1, NOT authenticated"), "", inner) + "\n")
+		}
 	} else {
-		b.WriteString(row("encrypted", "no"))
+		b.WriteString(row("encrypted", dimStyle.Render("no"), "", inner) + "\n")
 	}
-	headerState := accentValueStyle.Render("consistent")
+	headerState := okBadge.Render("✓ consistent")
 	if !a.HeaderConsistent {
-		headerState = badStyle.Render("INCONSISTENT")
+		headerState = errBadge.Render("✗ INCONSISTENT")
 	}
-	b.WriteString(row("header", headerState))
-	payloadState := accentValueStyle.Render("checksum ok")
+	b.WriteString(row("header", headerState, "", inner) + "\n")
+	payloadState := okBadge.Render("✓ checksum ok")
 	if !a.PayloadCRCOK {
-		payloadState = badStyle.Render("CHECKSUM MISMATCH")
+		payloadState = errBadge.Render("✗ CHECKSUM MISMATCH")
 	}
-	b.WriteString(row("payload", payloadState+" "+dimStyle.Render("("+core.HumanSize(a.PayloadRead)+" read back)")))
-	return b.String()
+	b.WriteString(row("payload", payloadState+" "+dimStyle.Render("("+core.HumanSize(a.PayloadRead)+" read back)"), "", inner))
+	return panelFill("archive", sanitize(m.target.Name), b.String(), width, m.contentHeight(), false)
 }
 
+// --------------------------------------------------------------------- bench
+
 func (m Model) viewBench() string {
+	width := max(20, m.width)
+	inner := width - 4
 	var b strings.Builder
-	b.WriteString(header("benchmark", m.target.Path) + "\n\n")
 	if m.running {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  running %d/%d algorithms…", m.progress.ChunksDone, m.progress.ChunksTotal)) + "\n")
-		return b.String()
+		pct := 0.0
+		if m.progress.ChunksTotal > 0 {
+			pct = float64(m.progress.ChunksDone) / float64(m.progress.ChunksTotal)
+		}
+		b.WriteString("  " + m.spinner.View() + " " + dimStyle.Render(fmt.Sprintf("running %d/%d algorithms…", m.progress.ChunksDone, m.progress.ChunksTotal)) + "\n")
+		b.WriteString("  " + m.bar.ViewAs(pct))
+		return panelFill("benchmark", sanitize(m.target.Name), b.String(), width, m.contentHeight(), true)
 	}
 	if len(m.bench) == 0 {
-		b.WriteString(dimStyle.Render("  no results") + "\n")
-		return b.String()
+		b.WriteString(dimStyle.Render("  no results"))
+		return panelFill("benchmark", sanitize(m.target.Name), b.String(), width, m.contentHeight(), false)
 	}
-	b.WriteString(fmt.Sprintf("  %-14s %-9s %-11s %-13s %s\n", "algorithm", "ratio", "output", "throughput", "note"))
-	for _, row := range m.bench {
+	maxRatio := 0.0
+	for _, r := range m.bench {
+		if r.Ratio > maxRatio {
+			maxRatio = r.Ratio
+		}
+	}
+	showBar := inner >= 72
+	if showBar {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  %-12s  %-24s  %10s  %12s  %s",
+			"algorithm", "ratio", "output", "throughput", "note")) + "\n")
+	} else {
+		b.WriteString(dimStyle.Render(fmt.Sprintf("  %-12s  %7s  %10s  %12s  %s",
+			"algorithm", "ratio", "output", "throughput", "note")) + "\n")
+	}
+	for _, r := range m.bench {
 		note := ""
-		if row.BestRatio {
+		if r.BestRatio {
 			note = "best ratio"
 		}
-		if row.BestSpeed {
+		if r.BestSpeed {
 			if note != "" {
 				note += ", "
 			}
 			note += "fastest"
 		}
-		line := fmt.Sprintf("  %-14s %-9.4f %-11s %-13s %s", row.Algo, row.Ratio,
-			core.HumanSize(row.OutputBytes), core.HumanRate(row.ThroughputMBps), note)
-		if row.BestRatio {
-			line = accentValueStyle.Render(line)
+		out := padLeft(core.HumanSize(r.OutputBytes), 10)
+		thr := padLeft(core.HumanRate(r.ThroughputMBps), 12)
+		var line string
+		if showBar {
+			line = fmt.Sprintf("  %-12s  %-24s  %s  %s  %s", r.Algo, ratioBar(r.Ratio, maxRatio), out, thr, note)
+		} else {
+			line = fmt.Sprintf("  %-12s  %7.4f  %s  %s  %s", r.Algo, r.Ratio, out, thr, note)
 		}
-		b.WriteString(line + "\n")
+		switch {
+		case r.BestRatio:
+			line = accentStyle.Render(line)
+		case r.BestSpeed:
+			line = infoStyle.Render(line)
+		default:
+			line = subtleStyle.Render(line)
+		}
+		b.WriteString(clip(line, inner) + "\n")
 	}
-	return b.String()
+	b.WriteString("\n  " + dimStyle.Render("ratio = compressed / original; lower is better"))
+	return panelFill("benchmark", sanitize(m.target.Name), strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), false)
 }
 
+// ---------------------------------------------------------------------- help
+
 func (m Model) viewHelp() string {
-	body := `
-  kolma drives a pluggable compression engine. This interface is a client of
-  the ` + "`kolma`" + ` binary: every screen you see is a real command, and the numbers
-  come from the engine's JSON output.
-
-  browse      move with j/k or the arrows, enter opens a directory or selects
-              a file, backspace goes up, . toggles hidden entries
-  inspect     the Analyzer's verdict for the selected file, then your settings
-              a/A cycles the algorithm (auto lets the Analyzer choose)
-              [ ] adjusts the level (1 fastest .. 9 best ratio)
-              p cycles the priority, t/T the threads, k the chunk size
-              o edits the output path, w sets a password
-              c compresses, d decompresses, b benchmarks, i reads an archive
-  run         live progress, then the final statistics and checksum result
-
-  The engine is C++20 and knows seven methods: store, rle, huffman, lz77, lzw,
-  bwt-mtf-ari and delta-rle. Archives are self-describing and carry a CRC-32 of
-  the original data, so a corrupted archive fails loudly instead of quietly.
-`
-	return header("help", "") + "\n" + valueStyle.Render(body)
+	width := max(20, m.width)
+	inner := width - 4
+	k := func(key, action string) string {
+		return clip("    "+keyStyle.Render(padRight(key, 14))+actionStyle.Render(action), inner)
+	}
+	section := func(name string) string { return "  " + titleStyle.Render(name) }
+	var b strings.Builder
+	intro := "kolma drives a pluggable compression engine. This interface is a client of the kolma binary: every screen is a real command, and every number comes from the engine's JSON output."
+	for _, ln := range strings.Split(ansi.Wordwrap(intro, max(10, inner-2), ""), "\n") {
+		b.WriteString("  " + dimStyle.Render(ln) + "\n")
+	}
+	b.WriteString("\n" + section("browse") + "\n")
+	b.WriteString(k("↑/↓ · j/k", "move") + "\n")
+	b.WriteString(k("enter · l", "open a directory, or select a file and analyse it") + "\n")
+	b.WriteString(k("backspace", "go up a directory") + "\n")
+	b.WriteString(k(". · r · g/G", "hidden files · refresh · top/bottom") + "\n")
+	b.WriteString("\n" + section("inspect") + "\n")
+	b.WriteString(k("a / A", "cycle the algorithm (auto lets the Analyzer choose)") + "\n")
+	b.WriteString(k("[ / ]", "level, 1 fastest .. 9 best ratio (0 = auto)") + "\n")
+	b.WriteString(k("p · t/T · k", "priority · threads · chunk size") + "\n")
+	b.WriteString(k("o · w", "edit the output path · set a password") + "\n")
+	b.WriteString(k("c · d", "compress · decompress") + "\n")
+	b.WriteString(k("b · i", "benchmark every method · read an archive's header") + "\n")
+	b.WriteString("\n" + section("run · archive · benchmark") + "\n")
+	b.WriteString(k("esc", "back to the file") + "\n")
+	b.WriteString(k("↑/↓ · wheel", "scroll") + "\n")
+	b.WriteString("\n" + section("everywhere") + "\n")
+	b.WriteString(k("? · q", "help · quit") + "\n")
+	b.WriteString("\n  " + dimStyle.Render(clip(sanitize(m.version), inner-2)) + "\n")
+	b.WriteString("  " + dimStyle.Render(clip("archives: format v2, CRC-32 verified; encrypted archives carry an HMAC-SHA256 tag", inner-2)))
+	return b.String()
 }
 
 // Run starts the program.
 func Run(client core.Client, version string) error {
 	model := New(client, version)
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := program.Run()
 	return err
 }
-
-var _ = lipgloss.NewStyle

@@ -216,6 +216,7 @@ std::string stats_json(const kolma::Stats& s) {
      << ",\"chunk_size\":" << s.chunk_size << ",\"orig_crc\":" << jstr(kolma::crc32_hex(s.orig_crc))
      << ",\"restored_crc\":" << jstr(kolma::crc32_hex(s.restored_crc))
      << ",\"verified\":" << (s.verified ? "true" : "false")
+     << ",\"restoring\":" << (s.restoring ? "true" : "false")
      << ",\"encrypted\":" << (s.encrypted ? "true" : "false")
      << ",\"authenticated\":" << (s.authenticated ? "true" : "false")
      << ",\"output\":" << jstr(s.output_path) << "}";

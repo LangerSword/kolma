@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LangerSword/kolma/tui/internal/core"
 )
@@ -408,5 +409,181 @@ func TestWindowResizeIsHonoured(t *testing.T) {
 	view := m.View()
 	if strings.TrimSpace(view) == "" {
 		t.Fatal("nothing rendered after a resize")
+	}
+}
+
+// ------------------------------------------------------------- regressions --
+
+func TestBenchmarkResultsAreSurfaced(t *testing.T) {
+	// Regression: resultMsg used to drop the benchmark rows on the floor, so
+	// the benchmark screen showed "no results" forever after a real run.
+	m, _ := newTestModel(t)
+	m = send(t, m, "down", "enter")
+	m.running = true
+	m.screen = screenBench
+	m.runID = 5
+	next, _ := m.Update(resultMsg{runID: 5, kind: "benchmark", res: core.Result{
+		OK: true,
+		Benchmark: []core.BenchmarkRow{
+			{Algo: "lz77", Ratio: 0.25, OutputBytes: 100, ThroughputMBps: 20, BestRatio: true},
+			{Algo: "store", Ratio: 1.0, OutputBytes: 400, ThroughputMBps: 900, BestSpeed: true},
+		},
+	}})
+	m = next.(Model)
+	if len(m.bench) != 2 {
+		t.Fatalf("benchmark rows were not stored: %d", len(m.bench))
+	}
+	view := m.View()
+	if !strings.Contains(view, "lz77") || !strings.Contains(view, "best ratio") {
+		t.Fatalf("the benchmark view is missing its rows:\n%s", view)
+	}
+	if strings.Contains(view, "no results") {
+		t.Fatalf("the benchmark view still says no results:\n%s", view)
+	}
+}
+
+func TestOverwriteNeedsASecondPress(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = send(t, m, "down", "enter")
+	m.running = true
+	m.runID = 9
+	next, _ := m.Update(resultMsg{runID: 9, kind: "compression", res: core.Result{
+		OK: false, Error: "output already exists: /tmp/a.txt.kolma (use --force to overwrite)",
+	}})
+	m = next.(Model)
+	if !m.pendingForce {
+		t.Fatal("an 'already exists' failure should arm the overwrite confirmation")
+	}
+	if !strings.Contains(m.status, "overwrite") {
+		t.Fatalf("the status should explain the second press, got %q", m.status)
+	}
+	// The second c press consumes the confirmation and starts the run.
+	m = send(t, m, "c")
+	if m.pendingForce {
+		t.Fatal("the confirmation should be consumed by the second press")
+	}
+	if !m.running {
+		t.Fatal("the second press should start the run")
+	}
+}
+
+func TestArchiveOutputDefaultStripsTheSuffix(t *testing.T) {
+	m, dir := newTestModel(t)
+	// b.kolma is the third entry; select it.
+	m = send(t, m, "G", "enter")
+	if !m.target.IsArchive {
+		t.Fatalf("expected the archive entry, got %q", m.target.Name)
+	}
+	want := filepath.Join(dir, "b")
+	if m.outputText() != want {
+		t.Fatalf("derived output is %q, want %q", m.outputText(), want)
+	}
+	m = send(t, m, "o")
+	if m.inputs[0].Value() != want {
+		t.Fatalf("prefilled output is %q, want %q", m.inputs[0].Value(), want)
+	}
+}
+
+func TestSanitizeNeutralizesControlCharacters(t *testing.T) {
+	got := sanitize("a\nb\x1b[31m\x00c")
+	if got != "a?b?[31m?c" {
+		t.Fatalf("sanitize produced %q", got)
+	}
+	if sanitize("plain.txt") != "plain.txt" {
+		t.Fatal("sanitize should leave clean names alone")
+	}
+}
+
+func TestMouseWheelMovesTheBrowserCursor(t *testing.T) {
+	m, _ := newTestModel(t)
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	m = next.(Model)
+	if m.cursor != 2 {
+		t.Fatalf("wheel down should move the cursor by 3 (clamped), got %d", m.cursor)
+	}
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+	m = next.(Model)
+	if m.cursor != 0 {
+		t.Fatalf("wheel up should return to the top, got %d", m.cursor)
+	}
+}
+
+// TestPanelBordersAreExact checks the panel primitive directly, without the
+// viewport: every line of a panel must be exactly the requested width. The
+// viewport silently clips overflow, so only a direct check catches a border
+// that overhangs its own body.
+func TestPanelBordersAreExact(t *testing.T) {
+	for _, w := range []int{20, 40, 59, 60, 80, 120} {
+		for _, right := range []string{"", "2/3", "sample.txt"} {
+			p := panel("title", right, "line one\nline two", w, 5, false)
+			for i, ln := range strings.Split(p, "\n") {
+				if got := ansi.StringWidth(ln); got != w {
+					t.Fatalf("panel(width=%d, right=%q) line %d has width %d, want %d:\n%q",
+						w, right, i, got, w, ln)
+				}
+			}
+		}
+	}
+}
+
+// TestEveryScreenFitsTheTerminal is the permanent "not broken" guard: at every
+// supported size, no rendered line may be wider than the terminal and no frame
+// may be taller than it. Overflow is what makes a TUI feel broken.
+func TestEveryScreenFitsTheTerminal(t *testing.T) {
+	sizes := []struct{ w, h int }{{120, 40}, {100, 30}, {80, 24}, {60, 20}}
+	for _, sz := range sizes {
+		m, _ := newTestModel(t)
+		next, _ := m.Update(tea.WindowSizeMsg{Width: sz.w, Height: sz.h})
+		m = next.(Model)
+		m.analysis = core.Analysis{
+			Path: "a.txt", Size: 11, Type: "Text", TypeDetail: "text", Entropy: 3.2,
+			Compressibility: 0.7, RecommendedAlgo: "lz77", RecommendedLevel: 6,
+			Rationale: "text-like input with a fairly long rationale that should wrap instead of overflowing the panel",
+			Trials: []core.Trial{
+				{Algo: "lz77", Ratio: 0.4, ElapsedMS: 1.2},
+				{Algo: "bwt-mtf-ari", Ratio: 0.3, ElapsedMS: 9.9},
+			},
+		}
+		m.archive = &core.ArchiveInfo{Version: 2, Source: "a.txt", Algorithm: "lz77", OrigSize: 11,
+			CompSize: 5, ChunkCount: 1, ChunkSize: 11, OrigCRC: "deadbeef", HeaderConsistent: true,
+			PayloadCRCOK: true, PayloadRead: 5, Encrypted: true, Authenticated: true, KDFIterations: 200000}
+		m.bench = []core.BenchmarkRow{
+			{Algo: "bwt-mtf-ari", Ratio: 0.3, OutputBytes: 3, ThroughputMBps: 7, BestRatio: true},
+			{Algo: "lz77", Ratio: 0.4, OutputBytes: 4, ThroughputMBps: 20},
+			{Algo: "store", Ratio: 1.0, OutputBytes: 11, ThroughputMBps: 3000, BestSpeed: true},
+		}
+		m.result = core.Result{OK: true, Stats: core.Stats{Algorithm: "lz77", AlgorithmName: "LZ77 (LZSS)",
+			Ratio: 0.4, OrigSize: 11, CompSize: 4, Level: 6, Chunks: 1, ChunkSize: 11, Threads: 16,
+			OrigCRC: "deadbeef", Encrypted: true, Authenticated: true, Output: "/tmp/a.txt.kolma"}}
+		m.progress = core.Progress{BytesIn: 11, BytesOut: 4, ChunksDone: 1, ChunksTotal: 1, Ratio: 0.4, ThroughputMBps: 20}
+		m.status = "compression finished: ratio 0.4000"
+
+		for _, screen := range []screen{screenBrowse, screenInspect, screenRun, screenInfo, screenBench, screenHelp} {
+			m.screen = screen
+			// Raw content first: the viewport clips overflow, which would hide
+			// a too-wide panel from the final-frame check below.
+			raw := m.viewBrowse()
+			if screen != screenBrowse {
+				raw = m.screenContent()
+			}
+			for i, ln := range strings.Split(raw, "\n") {
+				if w := ansi.StringWidth(ln); w > sz.w {
+					t.Fatalf("%dx%d screen %v raw line %d: width %d overflows:\n%q",
+						sz.w, sz.h, screen, i, w, ln)
+				}
+			}
+			view := m.View()
+			lines := strings.Split(view, "\n")
+			if len(lines) > sz.h {
+				t.Fatalf("%dx%d screen %v: frame is %d lines tall, overflows the terminal",
+					sz.w, sz.h, screen, len(lines))
+			}
+			for i, ln := range lines {
+				if w := ansi.StringWidth(ln); w > sz.w {
+					t.Fatalf("%dx%d screen %v line %d: width %d overflows the terminal:\n%q",
+						sz.w, sz.h, screen, i, w, ln)
+				}
+			}
+		}
 	}
 }

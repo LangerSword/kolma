@@ -37,6 +37,7 @@ type Stats struct {
 	OrigCRC        string  `json:"orig_crc"`
 	RestoredCRC    string  `json:"restored_crc"`
 	Verified       bool    `json:"verified"`
+	Restoring      bool    `json:"restoring"`
 	Encrypted      bool    `json:"encrypted"`
 	Authenticated  bool    `json:"authenticated"`
 	Output         string  `json:"output"`

@@ -11,14 +11,17 @@ usage: tui_smoke.py [--tui PATH] [--engine PATH] [--workdir DIR]
 from __future__ import annotations
 
 import argparse
+import fcntl
 import os
 import pty
 import re
 import select
 import shutil
 import signal
+import struct
 import sys
 import tempfile
+import termios
 import time
 
 TIMEOUT = 20.0
@@ -36,6 +39,9 @@ class Screen:
         env["LINES"] = "40"
         pid, fd = pty.fork()
         if pid == 0:  # child
+            # A real terminal always has a size; give the pty one before the
+            # program starts, or bubbletea sees 0x0 and renders degenerate.
+            fcntl.ioctl(0, termios.TIOCSWINSZ, struct.pack("HHHH", 40, 120, 0, 0))
             os.chdir(cwd)
             os.execvpe(argv[0], argv, env)
         self.pid = pid
@@ -159,7 +165,7 @@ def main() -> int:
         print("  ok  fixture file listed")
 
         screen.send("\x1b[B")  # down
-        if "> file sample.txt" not in screen.plain():
+        if "▸ file sample.txt" not in screen.plain():
             fail("the cursor did not move to the second entry", screen)
         print("  ok  cursor moved")
 
