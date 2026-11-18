@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -54,6 +55,7 @@ struct Options {
   bool verify = true;
   bool force = false;
   bool password_flag = false;
+  bool stdout_output = false;  // -o -: payload to stdout, reports to stderr
   std::string algorithm = "auto";
   std::string priority = "balanced";
   std::string output;
@@ -162,8 +164,8 @@ Options parse_options(int argc, char** argv, int start) {
 void print_usage(std::ostream& os) {
   os << "kolma " << kVersion << " -- a pluggable compression engine\n\n"
      << "usage:\n"
-     << "  kolma compress   <file> [options]\n"
-     << "  kolma decompress <archive> [options]\n"
+     << "  kolma compress   <file> [options]      # <file> may be - for stdin\n"
+     << "  kolma decompress <archive> [options]   # -o - writes the payload to stdout\n"
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
      << "  kolma info       <archive> [--no-check] [--json]\n"
@@ -173,7 +175,7 @@ void print_usage(std::ostream& os) {
      << "  -a, --algo <id>        store | rle | huffman | lz77 | lzw | bwt-mtf-ari | delta-rle | auto\n"
      << "  -l, --level <1-9>      effort; 1 = fastest, 9 = best ratio\n"
      << "  -p, --priority <p>     maxratio | balanced | maxspeed (used when --algo is auto)\n"
-     << "  -o, --out <path>       output path (existing files are refused unless --force)\n"
+     << "  -o, --out <path>       output path; - writes to stdout (reports go to stderr)\n"
      << "      --password <pw>    encrypt (visible in ps; prefer KOLMA_PASSWORD)\n"
      << "  -t, --threads <n>      worker threads (default: hardware concurrency)\n"
      << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes (max 64M)\n"
@@ -301,12 +303,65 @@ int finish(const kolma::Result& r, const Options& o, bool human_report) {
   } else {
     clear_progress_line(o.quiet);
     if (r.ok) {
-      if (human_report) std::cout << kolma::format_stats(r.stats);
+      // With -o - the payload owns stdout; reports go to stderr.
+      if (human_report) {
+        std::ostream& os = o.stdout_output ? std::cerr : std::cout;
+        os << kolma::format_stats(r.stats);
+      }
     } else {
       std::cerr << "kolma: " << r.error << "\n";
     }
   }
   return r.ok ? 0 : 1;
+}
+
+// A named temporary file that cleans itself up. Used to spool stdin/stdout
+// around the engine, which works on real files (pread, parallel chunks).
+struct TempFile {
+  std::string path;
+  bool create() {
+    char tmpl[] = "/tmp/kolma-pipe-XXXXXX";
+    int fd = ::mkstemp(tmpl);
+    if (fd < 0) return false;
+    ::close(fd);
+    path = tmpl;
+    return true;
+  }
+  ~TempFile() {
+    if (!path.empty()) std::remove(path.c_str());
+  }
+};
+
+bool spool_stdin_to(const std::string& path) {
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) return false;
+  char buf[65536];
+  while (std::cin) {
+    std::cin.read(buf, sizeof buf);
+    std::streamsize n = std::cin.gcount();
+    if (n > 0) out.write(buf, n);
+  }
+  out.flush();
+  return out.good();
+}
+
+bool stream_file_to_stdout(const std::string& path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  char buf[65536];
+  while (in) {
+    in.read(buf, sizeof buf);
+    std::streamsize n = in.gcount();
+    if (n > 0) std::cout.write(buf, n);
+  }
+  std::cout.flush();
+  return std::cout.good();
+}
+
+bool is_file_command(const std::string& c) {
+  return c == "analyze" || c == "inspect" || c == "info" || c == "bench" || c == "benchmark" ||
+         c == "compress" || c == "c" || c == "pack" || c == "decompress" || c == "d" ||
+         c == "unpack" || c == "extract";
 }
 
 }  // namespace
@@ -389,7 +444,33 @@ int main(int argc, char** argv) {
     std::cerr << "kolma: " << command << " needs a file argument\n";
     return 2;
   }
-  const std::string input = o.positionals.front();
+  std::string input = o.positionals.front();
+
+  // Pipes: "-" spools stdin to a temp file (the engine needs a real file for
+  // pread and parallel chunks); "-o -" spools the payload back out to stdout.
+  TempFile spool_in;
+  TempFile spool_out;
+  if (input == "-" && is_file_command(command)) {
+    if (!spool_in.create() || !spool_stdin_to(spool_in.path)) {
+      std::cerr << "kolma: cannot spool stdin\n";
+      return 1;
+    }
+    input = spool_in.path;
+    kolma::Mode m;
+    if (o.output.empty() && kolma::mode_from_name(command, m)) o.output = "-";
+  }
+  if (o.output == "-" && is_file_command(command)) {
+    if (o.json) {
+      std::cerr << "kolma: --json cannot be combined with stdout output (-o -)\n";
+      return 2;
+    }
+    if (!spool_out.create()) {
+      std::cerr << "kolma: cannot create a temporary output file\n";
+      return 1;
+    }
+    o.output = spool_out.path;
+    o.stdout_output = true;
+  }
 
   kolma::Priority priority = kolma::Priority::Balanced;
   if (!kolma::priority_from_name(o.priority, priority)) {
@@ -460,14 +541,19 @@ int main(int argc, char** argv) {
   job.chunk_size = size_t(std::max(0ll, o.chunk_size));
   job.memory_limit = size_t(std::max(0ll, o.memory_limit));
   job.verify = o.verify;
-  job.force = o.force;
+  job.force = o.force || o.stdout_output;  // the spool file is ours to overwrite
 
   kolma::Result r = kolma::run_job(job, progress);
   if (!r.ok) return finish(r, o, false);
 
+  if (o.stdout_output && !stream_file_to_stdout(spool_out.path)) {
+    std::cerr << "kolma: failed to write the payload to stdout\n";
+    return 1;
+  }
   if (!o.json && !o.quiet && !r.analysis.rationale.empty() && mode == kolma::Mode::Compress) {
     clear_progress_line(o.quiet);
-    std::cout << "analysis    : " << r.analysis.rationale << "\n\n";
+    std::ostream& os = o.stdout_output ? std::cerr : std::cout;
+    os << "analysis    : " << r.analysis.rationale << "\n\n";
   }
   return finish(r, o, true);
 }

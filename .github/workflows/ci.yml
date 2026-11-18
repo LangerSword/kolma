@@ -40,6 +40,19 @@ jobs:
           cmp README.md /tmp/readme.out
           ./build/kolma bench README.md --limit 64K
 
+      - name: Smoke-test the CLI through pipes
+        run: |
+          set -euo pipefail
+          cat README.md | ./build/kolma compress - -q > /tmp/pipe.kolma
+          ./build/kolma decompress /tmp/pipe.kolma -o - -q > /tmp/pipe.out
+          cmp README.md /tmp/pipe.out
+          KOLMA_PASSWORD=ci ./build/kolma compress - -q < README.md 2>/dev/null \
+            | KOLMA_PASSWORD=ci ./build/kolma decompress - -q 2>/dev/null > /tmp/pipe-enc.out
+          cmp README.md /tmp/pipe-enc.out
+          if ./build/kolma compress README.md -o - --json -q >/dev/null 2>&1; then
+            echo "--json with stdout output must be refused"; exit 1
+          fi
+
       - name: Build the TUI
         run: cd tui && go vet ./... && go build -o kolma-tui .
 
