@@ -127,29 +127,35 @@ KOLMA_PASSWORD=pw kolma compress - < secret.txt \
 `kolma-tui` is a client, not a reimplementation. It shells out to the engine and
 reads the JSON contract the CLI emits, so there is exactly one implementation of
 every algorithm and the interface can be replaced without touching it. Built on
-[bubbletea](https://github.com/charmbracelet/bubbletea),
-[lipgloss](https://github.com/charmbracelet/lipgloss) and
-[bubbles](https://github.com/charmbracelet/bubbles); the design follows the
-discipline of lazygit and btop — one dark canvas, five semantic hues, panels
-with border-embedded titles, and a contextual key bar.
+the Charm stack: bubbletea, lipgloss, and bubbles (list with fuzzy filtering,
+table, help, key, spinner, progress, viewport, textinput). The design follows the
+discipline of lazygit and btop: one dark canvas, five semantic hues, panels
+with border-embedded titles, and a contextual key bar generated from the same
+binding map that drives the keys.
 
-| browse | inspect |
+| browse | fuzzy filter |
 | --- | --- |
-| ![browse](docs/screenshots/browse.png) | ![inspect](docs/screenshots/inspect.png) |
+| ![browse](docs/screenshots/browse.png) | ![filter](docs/screenshots/filter.png) |
 
-| run result | benchmark |
+| inspect | run result |
 | --- | --- |
-| ![run result](docs/screenshots/run-result.png) | ![benchmark](docs/screenshots/bench.png) |
+| ![inspect](docs/screenshots/inspect.png) | ![run result](docs/screenshots/run-result.png) |
+
+| benchmark | archive info |
+| --- | --- |
+| ![benchmark](docs/screenshots/bench.png) | ![archive info](docs/screenshots/info-encrypted.png) |
 
 Selecting a file runs the analyser for real and shows you what it found, along
 with the evidence: the verdict, the sample trials with their ratios and times,
 and the rationale. Settings sit beside it (stacked on narrow terminals); every
-panel scrolls when the terminal is short, and nothing ever overflows — a test
-asserts that at four terminal sizes.
+panel scrolls when the terminal is short, and nothing ever overflows. A test
+asserts that at four terminal sizes, and every screen is vision-audited from
+real terminal captures.
 
 | key | what it does |
 | --- | --- |
 | `j` / `k`, arrows | move in the browser (mouse wheel and click work too) |
+| `/` | fuzzy-filter the file list; `enter` accepts, `esc` clears |
 | `enter` | open a directory, or select a file and analyse it |
 | `backspace` | go up a directory |
 | `.` | show or hide dotfiles |
@@ -161,7 +167,7 @@ asserts that at four terminal sizes.
 | `o` / `w` | edit the output path, set a password |
 | `c` / `d` | compress, decompress (a second press confirms overwriting) |
 | `b` / `i` | benchmark every method, read an archive's header |
-| `↑` / `↓`, wheel | scroll long screens |
+| `↑` / `↓`, wheel | scroll long screens; move the benchmark table selection |
 | `?` | help |
 | `esc` | back one screen |
 | `q` | quit |
@@ -310,7 +316,7 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 
 ```sh
 make test        # 75 C++ tests
-make tui-test    # 32 Go tests, driving the real engine binary
+make tui-test    # 36 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
 make fuzz        # libFuzzer under ASan/UBSan (needs clang; FUZZ_TIME=seconds)
