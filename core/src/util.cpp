@@ -99,6 +99,7 @@ void sha256_block(Sha256Ctx& c, const uint8_t* p) {
 }
 
 void sha256_update(Sha256Ctx& c, const uint8_t* p, size_t n) {
+  if (n == 0) return;  // memcpy(dst, nullptr, 0) is UB; empty views are common
   c.total += n;
   while (n > 0) {
     size_t take = std::min<size_t>(64 - c.buflen, n);
@@ -121,8 +122,6 @@ std::array<uint8_t, 32> sha256_final(Sha256Ctx& c) {
   while (c.buflen != 56) sha256_update(c, &zero, 1);
   uint8_t len[8];
   for (int i = 0; i < 8; ++i) len[i] = uint8_t(bits >> (56 - i * 8));
-  // Bypass the length accounting: the padding bytes are not message bytes.
-  c.total -= (c.buflen == 0 ? 0 : 0);
   std::memcpy(c.buf + c.buflen, len, 8);
   c.buflen = 64;
   sha256_block(c, c.buf);
@@ -155,7 +154,7 @@ std::array<uint8_t, 32> hmac_sha256(View key, View message) {
   if (key.size() > B) {
     auto d = sha256(key);
     std::memcpy(k, d.data(), d.size());
-  } else {
+  } else if (!key.empty()) {
     std::memcpy(k, key.data(), key.size());
   }
   uint8_t ipad[B], opad[B];
@@ -355,6 +354,25 @@ bool constant_time_equal(View a, View b) {
   uint8_t diff = 0;
   for (size_t i = 0; i < a.size(); ++i) diff = uint8_t(diff | (a[i] ^ b[i]));
   return diff == 0;
+}
+
+bool safe_file_name(std::string_view name) {
+  if (name.empty() || name == "." || name == "..") return false;
+  for (char c : name) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    if (u < 0x20 || u == 0x7F || c == '/' || c == '\\') return false;
+  }
+  return true;
+}
+
+std::string sanitize_for_terminal(std::string_view text) {
+  std::string out;
+  out.reserve(text.size());
+  for (char c : text) {
+    const unsigned char u = static_cast<unsigned char>(c);
+    out.push_back((u < 0x20 || u == 0x7F) ? '?' : c);
+  }
+  return out;
 }
 
 }  // namespace kolma

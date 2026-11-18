@@ -183,24 +183,7 @@ std::string strip_kolma_suffix(const std::string& path) {
 // Loads a whole archive header, growing the read when the chunk table is large.
 bool load_header(const std::string& path, ArchiveHeader& header, size_t& payload_offset,
                  std::string& error) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    error = "cannot open " + path;
-    return false;
-  }
-  Bytes buffer(64 * 1024);
-  in.read(reinterpret_cast<char*>(buffer.data()), std::streamsize(buffer.size()));
-  buffer.resize(size_t(in.gcount()));
-  if (!parse_header(View(buffer), header, payload_offset, error)) return false;
-  if (payload_offset > buffer.size()) {
-    buffer.resize(payload_offset);
-    in.clear();
-    in.seekg(0);
-    in.read(reinterpret_cast<char*>(buffer.data()), std::streamsize(buffer.size()));
-    buffer.resize(size_t(in.gcount()));
-    if (!parse_header(View(buffer), header, payload_offset, error)) return false;
-  }
-  return true;
+  return load_archive_header(path, header, payload_offset, error);
 }
 
 struct ProgressReporter {
@@ -461,10 +444,11 @@ Result run_decompress(const Job& job, const ProgressFn& on_progress) {
   if (output.empty()) {
     output = strip_kolma_suffix(job.input);
     if (output.empty()) {
-      std::string name = header.source_name;
-      bool safe_name = !name.empty() && name.find('/') == std::string::npos &&
-                       name != "." && name != "..";
-      if (safe_name) {
+      // The recorded name is untrusted: it must be a single, control-free path
+      // component or we refuse to use it (a NUL would truncate at open() time,
+      // an escape sequence would forge terminal output, a '/' would escape).
+      const std::string& name = header.source_name;
+      if (safe_file_name(name)) {
         output = (std::filesystem::path(job.input).parent_path() / name).string();
       } else {
         output = job.input + ".out";
@@ -844,8 +828,8 @@ std::string format_archive_info(const ArchiveInfo& info) {
   }
   const ArchiveHeader& h = info.header;
   os << "archive     : version " << h.version << "\n";
-  os << "source      : " << h.source_name << " (" << info.file_type_name << " / " << h.type_detail
-     << ")\n";
+  os << "source      : " << sanitize_for_terminal(h.source_name) << " (" << info.file_type_name
+     << " / " << sanitize_for_terminal(h.type_detail) << ")\n";
   os << "algorithm   : " << info.algorithm_id << " (" << info.algorithm_name << ") at level "
      << int(h.level) << "\n";
   os << "original    : " << human_size(h.orig_size) << "\n";

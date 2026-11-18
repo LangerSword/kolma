@@ -31,6 +31,14 @@ inline constexpr uint16_t kArchiveVersion = 1;
 inline constexpr size_t kSaltSize = 16;
 inline constexpr size_t kNonceSize = 12;
 inline constexpr uint32_t kDefaultKdfIterations = 200000;
+// Hard limits on what a header may claim. They bound every allocation the
+// decompressor makes from untrusted input: a chunk can never be larger than
+// kMaxChunkSize, the KDF can never be asked for more than kMaxKdfIterations
+// rounds, and a header can never be larger than kMaxHeaderBytes. Archives
+// kolma writes always satisfy them; anything else is refused, not attempted.
+inline constexpr uint64_t kMaxChunkSize = 64ull << 20;          // 64 MiB
+inline constexpr uint32_t kMaxKdfIterations = 10000000;         // ~seconds, not years
+inline constexpr uint64_t kMaxHeaderBytes = 64ull << 20;        // ~3.9M chunks
 
 enum ArchiveFlags : uint8_t {
   kArchiveEncrypted = 1u << 0,
@@ -100,5 +108,12 @@ struct ArchiveInfo {
 // Reads the header and, when `check_payload` is set, streams the payload to
 // verify payload_crc without decompressing anything.
 ArchiveInfo read_archive_info(const std::string& path, bool check_payload = true);
+
+// Loads and validates a whole archive header from disk, sizing the read from
+// the header's own length fields (the chunk table can be far larger than one
+// read). Also checks that the file actually contains the claimed payload.
+// This is the only header-loading path: the engine and `info` share it.
+bool load_archive_header(const std::string& path, ArchiveHeader& header, size_t& payload_offset,
+                         std::string& error);
 
 }  // namespace kolma

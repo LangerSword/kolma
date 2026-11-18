@@ -44,4 +44,15 @@ std::string format_ratio(double ratio);
 // Constant-time comparison; never short-circuits on the first differing byte.
 bool constant_time_equal(View a, View b);
 
+// ------------------------------------------------------------------- names
+// A name is safe to use as a single path component only if it is non-empty,
+// contains no separator and no control characters (a NUL would truncate the
+// path at open() time; an escape sequence would forge terminal output), and is
+// not "." or "..".
+bool safe_file_name(std::string_view name);
+// Renders untrusted text (archive source names, file names) for a terminal by
+// replacing control characters with '?'. Never let raw header bytes reach a
+// display: they can carry escape sequences.
+std::string sanitize_for_terminal(std::string_view text);
+
 }  // namespace kolma

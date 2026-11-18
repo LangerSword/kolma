@@ -1,8 +1,10 @@
 // Archive header serialisation, validation and key derivation.
+#include <algorithm>
 #include <string>
 
 #include "kolma/archive.hpp"
 #include "kolma/algorithm.hpp"
+#include "kolma/engine.hpp"
 #include "test_framework.hpp"
 #include "test_helpers.hpp"
 
@@ -16,8 +18,8 @@ ArchiveHeader sample_header() {
   h.level = 7;
   h.file_type = uint8_t(FileType::Text);
   h.flags = kArchiveEncrypted;
-  h.orig_size = 1234567;
-  h.comp_size = 456789;
+  h.orig_size = 3 * 65536;   // must equal the chunk table's sum
+  h.comp_size = 60003;       // 20000 + 20001 + 20002
   h.orig_crc = 0xDEADBEEF;
   h.created = 1700000000;
   h.chunk_size = 65536;
@@ -31,6 +33,42 @@ ArchiveHeader sample_header() {
   h.payload_crc = 0x12345678;
   return h;
 }
+
+// Crafts a valid all-raw archive around `payload`, split into `chunk_size`
+// pieces. Raw chunks restore the payload verbatim, so both checksums are the
+// payload's CRC. Used to exercise the loader with headers of any size.
+Bytes craft_raw_archive(const std::string& name, const Bytes& payload, size_t chunk_size) {
+  ArchiveHeader h;
+  h.algo_index = algorithm_index("store");
+  h.level = 1;
+  h.orig_size = payload.size();
+  h.comp_size = payload.size();
+  h.orig_crc = crc32(View(payload));
+  h.payload_crc = crc32(View(payload));
+  h.created = 1700000000;
+  h.chunk_size = chunk_size;
+  h.source_name = name;
+  for (size_t off = 0; off < payload.size(); off += chunk_size) {
+    const uint64_t len = std::min<uint64_t>(chunk_size, payload.size() - off);
+    h.chunks.push_back(ChunkRecord{len, len, kChunkStoredRaw});
+  }
+  if (h.chunks.empty()) h.chunks.push_back(ChunkRecord{0, 0, kChunkStoredRaw});
+  h.chunk_count = uint32_t(h.chunks.size());
+  Bytes out = serialize_header(h);
+  out.insert(out.end(), payload.begin(), payload.end());
+  return out;
+}
+
+// Little-endian patch helpers: the fixed header fields live at known offsets.
+void patch_u32(Bytes& b, size_t off, uint32_t v) {
+  for (int i = 0; i < 4; ++i) b[off + size_t(i)] = uint8_t(v >> (i * 8));
+}
+void patch_u64(Bytes& b, size_t off, uint64_t v) {
+  for (int i = 0; i < 8; ++i) b[off + size_t(i)] = uint8_t(v >> (i * 8));
+}
+constexpr size_t kOffOrigSize = 11;
+constexpr size_t kOffChunkCount = 47;
+constexpr size_t kOffKdfIterations = 51;
 
 }  // namespace
 
@@ -137,4 +175,146 @@ KOLMA_TEST(archive_info_reports_a_non_kolma_file) {
   ArchiveInfo info = read_archive_info(path);
   CHECK(!info.ok);
   CHECK(info.error.find("magic") != std::string::npos);
+}
+
+// ---------------------------------------------------------------- hardening --
+
+KOLMA_TEST(archive_header_rejects_a_chunk_count_bomb) {
+  // chunk_count is untrusted: 0xFFFFFFFF entries would reserve ~68 GiB if the
+  // parser believed it. The buffer's own size must cap the table first.
+  Bytes bytes = serialize_header(sample_header());
+  patch_u32(bytes, kOffChunkCount, 0xFFFFFFFFu);
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+  CHECK(error.find("chunk table") != std::string::npos);
+  CHECK(parsed.chunks.empty());  // refused before any reservation
+}
+
+KOLMA_TEST(archive_header_rejects_zero_chunks) {
+  Bytes bytes = serialize_header(sample_header());
+  patch_u32(bytes, kOffChunkCount, 0);
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+}
+
+KOLMA_TEST(archive_header_rejects_inconsistent_sizes) {
+  Bytes bytes = serialize_header(sample_header());
+  patch_u64(bytes, kOffOrigSize, 3 * 65536 + 1);  // table no longer adds up
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+  CHECK(error.find("do not match") != std::string::npos);
+}
+
+KOLMA_TEST(archive_header_rejects_oversized_chunks) {
+  Bytes bytes = serialize_header(sample_header());
+  // First chunk record starts after the fixed part and both strings:
+  // 83 + 2 + 9 ("notes.txt") + 2 + 8 ("markdown") = 104.
+  patch_u64(bytes, 104, 65537);  // orig_size > chunk_size
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+  CHECK(error.find("claims more than the chunk size") != std::string::npos);
+}
+
+KOLMA_TEST(archive_header_rejects_extreme_kdf_iterations) {
+  Bytes bytes = serialize_header(sample_header());
+  patch_u32(bytes, kOffKdfIterations, 0xFFFFFFFFu);  // ~years of PBKDF2
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+  CHECK(error.find("kdf iterations") != std::string::npos);
+}
+
+KOLMA_TEST(archive_header_rejects_an_oversized_chunk_size) {
+  Bytes bytes = serialize_header(sample_header());
+  patch_u64(bytes, 39, kMaxChunkSize + 1);  // chunk_size field
+  ArchiveHeader parsed;
+  size_t offset = 0;
+  std::string error;
+  CHECK(!parse_header(View(bytes), parsed, offset, error));
+  CHECK(error.find("chunk size out of range") != std::string::npos);
+}
+
+KOLMA_TEST(large_headers_load_and_round_trip) {
+  // 5000 chunks -> an ~85 KB header, well past the old 64 KiB single read.
+  const Bytes payload = kolma_test::make_random(500000, 41);
+  const Bytes archive = craft_raw_archive("big.bin", payload, 100);
+  const std::string path = kolma_test::temp_path("large-header.kolma");
+  kolma_test::write_bytes(path, archive);
+
+  ArchiveInfo info = read_archive_info(path);
+  CHECK(info.ok);
+  CHECK(info.header_consistent);
+  CHECK(info.payload_crc_ok);
+  CHECK_EQ(info.header.chunk_count, uint32_t(5000));
+
+  Job back;
+  back.mode = Mode::Decompress;
+  back.input = path;
+  back.output = kolma_test::temp_path("large-header.out");
+  Result r = run_job(back);
+  CHECK(r.ok);
+  CHECK(r.stats.verified);
+  CHECK_BYTES_EQ(kolma_test::read_bytes(back.output), payload);
+}
+
+KOLMA_TEST(truncated_payloads_are_refused_before_any_work) {
+  const Bytes payload = kolma_test::make_repetitive(10000);
+  Bytes archive = craft_raw_archive("cut.bin", payload, 4096);
+  archive.resize(archive.size() - 100);  // lop off the tail of the payload
+  const std::string path = kolma_test::temp_path("truncated.kolma");
+  kolma_test::write_bytes(path, archive);
+
+  ArchiveInfo info = read_archive_info(path);
+  CHECK(!info.ok);
+  CHECK(info.error.find("truncated") != std::string::npos);
+
+  Job back;
+  back.mode = Mode::Decompress;
+  back.input = path;
+  back.output = kolma_test::temp_path("truncated.out");
+  Result r = run_job(back);
+  CHECK(!r.ok);
+  CHECK(!std::filesystem::exists(back.output));  // never even created
+}
+
+KOLMA_TEST(unsafe_source_names_never_become_output_paths) {
+  const Bytes payload = kolma_test::make_text_like(2000);
+  const std::vector<std::string> bad_names = {"../escape.txt", "a/b.txt", ".", "..",
+                                              "evil\nname", std::string("nul\0name", 8)};
+  for (const std::string& name : bad_names) {
+    const Bytes archive = craft_raw_archive(name, payload, 4096);
+    const std::string path = kolma_test::temp_path("mystery-name.bin");
+    kolma_test::write_bytes(path, archive);
+    Job back;
+    back.mode = Mode::Decompress;
+    back.input = path;
+    Result r = run_job(back);
+    CHECK(r.ok);
+    CHECK_EQ(r.stats.output_path, path + ".out");  // fell back, did not escape
+    CHECK(!std::filesystem::exists(kolma_test::temp_path("escape.txt")));
+  }
+}
+
+KOLMA_TEST(name_helpers_reject_controls_and_separators) {
+  CHECK(safe_file_name("notes.txt"));
+  CHECK(safe_file_name("with space.dat"));
+  CHECK(!safe_file_name(""));
+  CHECK(!safe_file_name("."));
+  CHECK(!safe_file_name(".."));
+  CHECK(!safe_file_name("a/b"));
+  CHECK(!safe_file_name("a\\b"));
+  CHECK(!safe_file_name(std::string("a\0b", 3)));
+  CHECK(!safe_file_name("a\nb"));
+  CHECK(!safe_file_name("\x1b[31mred"));
+  CHECK_EQ(sanitize_for_terminal("a\nb\x1b[31m"), std::string("a?b?[31m"));
+  CHECK_EQ(sanitize_for_terminal("plain.txt"), std::string("plain.txt"));
 }
