@@ -1,7 +1,12 @@
 #include "kolma/engine.hpp"
 
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#else
 #include <fcntl.h>
 #include <unistd.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -31,12 +36,28 @@ double rate_mbps(uint64_t bytes, double elapsed_ms) {
   return double(bytes) / (elapsed_ms / 1000.0) / 1e6;
 }
 
+// Platform helpers keep the read path POSIX on Linux/macOS and map to the
+// MSVCRT underscored calls on Windows, so parallel pread works everywhere.
+#ifdef _WIN32
+inline int fd_open(const char* path) { return ::_open(path, _O_RDONLY | _O_BINARY); }
+inline void fd_close(int fd) { ::_close(fd); }
+inline long long fd_pread(int fd, void* dst, size_t len, long long off) {
+  return ::_pread(fd, dst, static_cast<unsigned int>(len), off);
+}
+#else
+inline int fd_open(const char* path) { return ::open(path, O_RDONLY); }
+inline void fd_close(int fd) { ::close(fd); }
+inline long long fd_pread(int fd, void* dst, size_t len, long long off) {
+  return ::pread(fd, dst, len, off_t(off));
+}
+#endif
+
 // Small RAII wrapper so the read path can use pread from several threads
 // without sharing a file position.
 class FileDescriptor {
  public:
   FileDescriptor() = default;
-  explicit FileDescriptor(const std::string& path) : fd_(::open(path.c_str(), O_RDONLY)) {}
+  explicit FileDescriptor(const std::string& path) : fd_(fd_open(path.c_str())) {}
   ~FileDescriptor() { close(); }
   FileDescriptor(const FileDescriptor&) = delete;
   FileDescriptor& operator=(const FileDescriptor&) = delete;
@@ -44,14 +65,14 @@ class FileDescriptor {
   bool valid() const { return fd_ >= 0; }
   void close() {
     if (fd_ >= 0) {
-      ::close(fd_);
+      fd_close(fd_);
       fd_ = -1;
     }
   }
   bool read_exact(uint64_t offset, uint8_t* dst, size_t len) const {
     size_t done = 0;
     while (done < len) {
-      ssize_t got = ::pread(fd_, dst + done, len - done, off_t(offset + done));
+      long long got = fd_pread(fd_, dst + done, len - done, static_cast<long long>(offset + done));
       if (got <= 0) return false;
       done += size_t(got);
     }
@@ -276,6 +297,7 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
   header.algo_index = algorithm_index(algo_id);
   header.level = uint8_t(level);
   header.file_type = uint8_t(info.type);
+  if (job.bundle) header.flags |= kArchiveBundle;
   header.orig_size = info.size;
   header.created = now_unix();
   header.chunk_size = chunk_size;
@@ -436,6 +458,7 @@ Result run_compress(const Job& job, const ProgressFn& on_progress) {
   r.stats.restoring = false;
   r.stats.encrypted = encrypt;
   r.stats.authenticated = encrypt;  // every new encrypted archive carries a MAC
+  r.stats.bundle = job.bundle;
   r.stats.output_path = output;
   return r;
 }
@@ -657,6 +680,7 @@ Result run_decompress(const Job& job, const ProgressFn& on_progress) {
   r.stats.restoring = true;
   r.stats.encrypted = encrypted;
   r.stats.authenticated = authenticated;
+  r.stats.bundle = archive_bundle(header);
   r.stats.output_path = output;
 
   if (bytes_out != header.orig_size) {

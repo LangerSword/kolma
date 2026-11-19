@@ -33,6 +33,7 @@ struct Job {
   size_t memory_limit = 256u << 20;
   bool verify = true;
   bool force = false;  // overwrite an existing output (refused by default)
+  bool bundle = false; // mark the payload as a tar bundle (set by compress_bundle)
 };
 
 struct Progress {
@@ -63,6 +64,7 @@ struct Stats {
   bool restoring = false;  // true for decompression, so the report can say what was checked
   bool encrypted = false;
   bool authenticated = false;  // encrypted AND MAC-verified (v2); v1 archives are not
+  bool bundle = false;         // payload is a tar of many files/folders
   std::string output_path;
 };
 

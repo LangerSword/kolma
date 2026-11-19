@@ -54,6 +54,9 @@ inline constexpr uint64_t kMaxHeaderBytes = 64ull << 20;        // ~3.9M chunks
 
 enum ArchiveFlags : uint8_t {
   kArchiveEncrypted = 1u << 0,
+  // The payload is a tar bundle of many files/folders, not a single file.
+  // Set by compress_bundle; extract_archive untars it. Old archives have it 0.
+  kArchiveBundle = 1u << 1,
 };
 
 enum ChunkFlags : uint8_t {
@@ -89,6 +92,7 @@ struct ArchiveHeader {
 };
 
 inline bool archive_encrypted(const ArchiveHeader& h) { return (h.flags & kArchiveEncrypted) != 0; }
+inline bool archive_bundle(const ArchiveHeader& h) { return (h.flags & kArchiveBundle) != 0; }
 
 // Serialises the whole header (magic through payload_crc) with no payload.
 Bytes serialize_header(const ArchiveHeader& header);
@@ -121,6 +125,7 @@ struct ArchiveInfo {
   std::string file_type_name;
   bool encrypted = false;
   bool authenticated = false;       // v2 + encrypted: an HMAC protects the archive
+  bool bundle = false;              // payload is a tar of many files/folders
   bool header_consistent = false;   // sizes and chunk table add up
   bool payload_crc_ok = false;      // payload read back and hashed
   uint64_t payload_read = 0;

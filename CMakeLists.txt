@@ -38,6 +38,7 @@ add_library(kolma_core STATIC
   core/src/analyzer.cpp
   core/src/archive.cpp
   core/src/engine.cpp
+  core/src/bundle.cpp
   core/src/algorithms/store.cpp
   core/src/algorithms/rle.cpp
   core/src/algorithms/huffman.cpp
@@ -65,6 +66,7 @@ add_executable(kolma_tests
   tests/test_auth.cpp
   tests/test_engine.cpp
   tests/test_analyzer.cpp
+  tests/test_bundle.cpp
 )
 target_link_libraries(kolma_tests PRIVATE kolma_core)
 add_test(NAME kolma_tests COMMAND kolma_tests)

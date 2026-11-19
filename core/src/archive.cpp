@@ -314,6 +314,7 @@ ArchiveInfo read_archive_info(const std::string& path, bool check_payload) {
   info.ok = true;
   info.encrypted = archive_encrypted(h);
   info.authenticated = info.encrypted && h.version >= 2;
+  info.bundle = archive_bundle(h);
   if (const Algorithm* a = algorithm_by_index(h.algo_index)) {
     info.algorithm_id = a->params().id;
     info.algorithm_name = a->params().name;
