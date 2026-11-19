@@ -39,7 +39,8 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
 
   auto* title = new QLabel("Compress");
   title->setObjectName("h1");
-  auto* sub = new QLabel("Drop files or a whole folder. kolma picks the best method and verifies the result.");
+  auto* sub = new QLabel("Drop files or a whole folder. By default you get a .zip anyone can open — "
+                         "switch to kolma’s own format for maximum squeeze or a password.");
   sub->setObjectName("sub");
   sub->setWordWrap(true);
   root->addWidget(title);
@@ -88,6 +89,19 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   auto* form = new QVBoxLayout(opts);
   form->setSpacing(10);
 
+  // Format choice — the single most important decision for a normal user.
+  auto* fmtRow = new QHBoxLayout;
+  fmtRow->addWidget(new QLabel("Format"));
+  m_format = new QComboBox;
+  m_format->addItems({"ZIP — opens on any computer (recommended)",
+                      "KOLMA — smallest size + password protection"});
+  fmtRow->addWidget(m_format, 1);
+  form->addLayout(fmtRow);
+  m_formatHint = new QLabel;
+  m_formatHint->setObjectName("dim");
+  m_formatHint->setWordWrap(true);
+  form->addWidget(m_formatHint);
+
   auto* outRow = new QHBoxLayout;
   outRow->addWidget(new QLabel("Save to"));
   m_output = new QLineEdit;
@@ -96,10 +110,17 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   outRow->addWidget(browse);
   form->addLayout(outRow);
   connect(browse, &QPushButton::clicked, this, [this] {
-    QString f = QFileDialog::getSaveFileName(this, "Save archive", m_output->text(),
-                                             "kolma archive (*.kolma)");
+    QString filter = useStd() ? "ZIP archive (*.zip);;All files (*)"
+                              : "kolma archive (*.kolma);;All files (*)";
+    QString f = QFileDialog::getSaveFileName(this, "Save archive", m_output->text(), filter);
     if (!f.isEmpty()) m_output->setText(f);
   });
+
+  // Engine-only options, hidden when producing a standard .zip.
+  m_engineOpts = new QWidget;
+  auto* engLay = new QVBoxLayout(m_engineOpts);
+  engLay->setContentsMargins(0, 0, 0, 0);
+  engLay->setSpacing(10);
 
   auto* algoRow = new QHBoxLayout;
   algoRow->addWidget(new QLabel("Method"));
@@ -111,7 +132,7 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   m_priority = new QComboBox;
   m_priority->addItems({"Balanced", "Best ratio", "Fastest"});
   algoRow->addWidget(m_priority, 1);
-  form->addLayout(algoRow);
+  engLay->addLayout(algoRow);
 
   auto* levelRow = new QHBoxLayout;
   levelRow->addWidget(new QLabel("Effort"));
@@ -123,7 +144,7 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   m_levelLabel->setMinimumWidth(60);
   levelRow->addWidget(m_level, 1);
   levelRow->addWidget(m_levelLabel);
-  form->addLayout(levelRow);
+  engLay->addLayout(levelRow);
   connect(m_level, &QSlider::valueChanged, this, [this](int v) {
     m_levelLabel->setText(v == 0 ? "Auto" : QString("Level %1").arg(v));
   });
@@ -136,9 +157,13 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   m_password->setEnabled(false);
   encRow->addWidget(m_encrypt);
   encRow->addWidget(m_password, 1);
-  form->addLayout(encRow);
+  engLay->addLayout(encRow);
   connect(m_encrypt, &QCheckBox::toggled, m_password, &QLineEdit::setEnabled);
+
+  form->addWidget(m_engineOpts);
   root->addWidget(opts);
+
+  connect(m_format, &QComboBox::currentIndexChanged, this, [this] { applyFormat(); });
 
   // Go + progress.
   m_go = new QPushButton("Compress");
@@ -176,7 +201,21 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
     QDesktopServices::openUrl(QUrl::fromLocalFile(fi.absolutePath()));
   });
 
+  applyFormat();
   refreshInputs();
+}
+
+bool CompressView::useStd() const { return m_format->currentIndex() == 0; }
+
+void CompressView::applyFormat() {
+  m_engineOpts->setVisible(!useStd());
+  m_formatHint->setText(useStd()
+      ? "A .zip opens everywhere — Windows, macOS, Linux, phones — with no extra software. "
+        "Best for sharing."
+      : "kolma’s own format usually compresses harder and can be locked with a password, "
+        "but only kolma can open it.");
+  // Re-suggest the output with the right extension unless the user typed their own.
+  if (!m_output->isModified() || m_output->text().isEmpty()) defaultOutput();
 }
 
 void CompressView::addPaths(const QStringList& paths) {
@@ -208,7 +247,8 @@ void CompressView::defaultOutput() {
   QString base = first.fileName();
   if (base.isEmpty()) base = "archive";
   QString dir = first.absolutePath();
-  QString suggested = QDir(dir).filePath(base + ".kolma");
+  QString ext = useStd() ? ".zip" : ".kolma";
+  QString suggested = QDir(dir).filePath(base + ext);
   if (m_output->text().isEmpty() || !m_output->isModified()) m_output->setText(suggested);
 }
 
@@ -229,6 +269,7 @@ void CompressView::setRunning(bool running) {
   m_running = running;
   m_go->setEnabled(!running && !m_inputs.isEmpty());
   m_go->setText(running ? "Compressing…" : "Compress");
+  m_format->setEnabled(!running);
 }
 
 void CompressView::start() {
@@ -241,25 +282,32 @@ void CompressView::start() {
     emit status("Choose where to save the archive.", true);
     return;
   }
-  if (!out.endsWith(".kolma")) out += ".kolma";
-  if (m_encrypt->isChecked() && m_password->text().isEmpty()) {
-    emit status("Enter a password, or turn encryption off.", true);
-    return;
-  }
-
-  bool bundle = m_inputs.size() > 1;
-  for (const QString& p : m_inputs)
-    if (QFileInfo(p).isDir()) bundle = true;
 
   JobSpec spec;
-  spec.kind = bundle ? JobSpec::CompressBundle : JobSpec::CompressFile;
   spec.inputs = m_inputs;
-  spec.output = out;
-  spec.algorithm = m_algo->currentIndex() == 0 ? "auto" : m_algo->currentText();
-  spec.priority = m_priority->currentIndex();
-  spec.level = m_level->value();
-  spec.password = m_encrypt->isChecked() ? m_password->text() : QString();
   spec.force = true;  // the destination is explicit; re-compressing replaces it
+
+  if (useStd()) {
+    if (!out.endsWith(".zip", Qt::CaseInsensitive)) out += ".zip";
+    spec.kind = JobSpec::CompressStd;
+    spec.format = "zip";
+    spec.output = out;
+  } else {
+    if (!out.endsWith(".kolma")) out += ".kolma";
+    if (m_encrypt->isChecked() && m_password->text().isEmpty()) {
+      emit status("Enter a password, or turn encryption off.", true);
+      return;
+    }
+    bool bundle = m_inputs.size() > 1;
+    for (const QString& p : m_inputs)
+      if (QFileInfo(p).isDir()) bundle = true;
+    spec.kind = bundle ? JobSpec::CompressBundle : JobSpec::CompressFile;
+    spec.output = out;
+    spec.algorithm = m_algo->currentIndex() == 0 ? "auto" : m_algo->currentText();
+    spec.priority = m_priority->currentIndex();
+    spec.level = m_level->value();
+    spec.password = m_encrypt->isChecked() ? m_password->text() : QString();
+  }
 
   m_result->hide();
   m_bar->setValue(0);
@@ -297,24 +345,37 @@ void CompressView::onFinished(bool ok, const QString& error, const QVariantMap& 
   double ratio = result.value("ratio").toDouble();
   uint64_t orig = result.value("orig_size").toULongLong();
   uint64_t comp = result.value("comp_size").toULongLong();
-  QString algo = result.value("algorithm").toString();
-  bool enc = result.value("encrypted").toBool();
-  bool auth = result.value("authenticated").toBool();
+  double saved = orig > 0 ? (1.0 - ratio) * 100.0 : 0.0;
 
   m_result->show();
   m_resultTitle->setText("Compressed ✓");
   m_resultTitle->setStyleSheet(QString("color:%1;").arg(Palette::accent));
-  QString body = QString("%1  →  %2   ·   ratio %3   ·   %4% saved\nMethod: %5")
-                     .arg(hs(orig), hs(comp))
-                     .arg(ratio, 0, 'f', 4)
-                     .arg(orig > 0 ? (1.0 - ratio) * 100.0 : 0.0, 0, 'f', 1)
-                     .arg(algo);
-  if (enc) body += auth ? "\nEncrypted · authenticated (HMAC-SHA256)" : "\nEncrypted (legacy, unauthenticated)";
-  body += "\nSaved to: " + m_lastOutput;
+
+  QString body;
+  if (useStd()) {
+    body = QString("%1  →  %2   ·   %3% smaller\nSaved to: %4\n"
+                   "Opens in any file manager — no special software needed.")
+               .arg(hs(orig), hs(comp))
+               .arg(saved, 0, 'f', 1)
+               .arg(m_lastOutput);
+  } else {
+    QString algo = result.value("algorithm").toString();
+    bool enc = result.value("encrypted").toBool();
+    bool auth = result.value("authenticated").toBool();
+    body = QString("%1  →  %2   ·   ratio %3   ·   %4% saved\nMethod: %5")
+               .arg(hs(orig), hs(comp))
+               .arg(ratio, 0, 'f', 4)
+               .arg(saved, 0, 'f', 1)
+               .arg(algo);
+    if (enc) body += auth ? "\nEncrypted · authenticated (HMAC-SHA256)"
+                          : "\nEncrypted (legacy, unauthenticated)";
+    body += "\nSaved to: " + m_lastOutput;
+  }
   m_resultBody->setText(body);
   m_openFolder->show();
-  emit status(QString("Compressed to %1 (%2% saved)").arg(QFileInfo(m_lastOutput).fileName())
-                .arg(orig > 0 ? (1.0 - ratio) * 100.0 : 0.0, 0, 'f', 1), false);
+  emit status(QString("Compressed to %1 (%2% saved)")
+                  .arg(QFileInfo(m_lastOutput).fileName())
+                  .arg(saved, 0, 'f', 1), false);
 }
 
 }  // namespace kolma::ui

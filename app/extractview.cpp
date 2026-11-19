@@ -21,6 +21,7 @@
 #include <QVBoxLayout>
 
 #include "kolma/archive.hpp"
+#include "kolma/stdarchive.hpp"
 #include "kolma/util.hpp"
 #include "theme.hpp"
 #include "worker.hpp"
@@ -39,7 +40,7 @@ ExtractView::ExtractView(QWidget* parent) : QWidget(parent) {
 
   auto* title = new QLabel("Extract");
   title->setObjectName("h1");
-  auto* sub = new QLabel("Open a .kolma archive to see what’s inside and check it’s intact, then extract.");
+  auto* sub = new QLabel("Open any archive — .zip, .7z, .tar.gz or .kolma — to see what’s inside, then extract.");
   sub->setObjectName("sub");
   sub->setWordWrap(true);
   root->addWidget(title);
@@ -49,13 +50,14 @@ ExtractView::ExtractView(QWidget* parent) : QWidget(parent) {
   auto* open = new QPushButton("Open archive…");
   open->setObjectName("primary");
   openRow->addWidget(open);
-  auto* dropHint = new QLabel("…or drop a .kolma file anywhere on this page");
+  auto* dropHint = new QLabel("…or drop an archive (.zip, .7z, .tar.gz, .kolma) anywhere on this page");
   dropHint->setObjectName("dim");
   openRow->addWidget(dropHint, 1);
   root->addLayout(openRow);
   connect(open, &QPushButton::clicked, this, [this] {
     QString f = QFileDialog::getOpenFileName(this, "Open archive", QString(),
-                                             "kolma archive (*.kolma);;All files (*)");
+                                             "Archives (*.zip *.7z *.tar *.tar.gz *.tgz *.tar.xz "
+                                             "*.tar.bz2 *.kolma);;All files (*)");
     if (!f.isEmpty()) openArchive(f);
   });
 
@@ -64,7 +66,7 @@ ExtractView::ExtractView(QWidget* parent) : QWidget(parent) {
   auto* infoLay = new QVBoxLayout(info);
   m_infoTitle = new QLabel("No archive open");
   m_infoTitle->setObjectName("h2");
-  m_infoBody = new QLabel("Open or drop a .kolma archive to begin.");
+  m_infoBody = new QLabel("Open or drop an archive to begin — .zip, .7z, .tar.gz and .kolma all work.");
   m_infoBody->setObjectName("sub");
   m_infoBody->setWordWrap(true);
   infoLay->addWidget(m_infoTitle);
@@ -137,6 +139,25 @@ ExtractView::ExtractView(QWidget* parent) : QWidget(parent) {
 }
 
 void ExtractView::openArchive(const QString& path) {
+  if (kolma::std_is_standard(path.toStdString())) {
+    m_archive = path;
+    m_encrypted = false;
+    m_bundle = true;
+    QFileInfo fi(path);
+    m_infoTitle->setText(fi.fileName());
+    QString fmt = QString::fromStdString(kolma::std_detect(path.toStdString()));
+    m_infoBody->setText(QString("%1  ·  %2 archive  ·  opens anywhere\n"
+                                "A standard archive — kolma reads it just like your file manager does.")
+                            .arg(hs(uint64_t(fi.size())), fmt));
+    m_password->setEnabled(false);
+    m_dest->setText(fi.absolutePath());
+    m_go->setEnabled(true);
+    m_result->hide();
+    m_tree->clear();
+    emit status("Opened " + fi.fileName(), false);
+    loadContents();
+    return;
+  }
   kolma::ArchiveInfo info = kolma::read_archive_info(path.toStdString(), false);
   if (!info.ok) {
     emit status(QString::fromStdString(info.error), true);

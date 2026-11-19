@@ -33,6 +33,8 @@ class CompressView : public QWidget {
  private:
   void refreshInputs();
   void defaultOutput();
+  void applyFormat();
+  bool useStd() const;
   void start();
   void onProgress(int pct, const QString& line);
   void onFinished(bool ok, const QString& error, const QVariantMap& result);
@@ -41,6 +43,9 @@ class CompressView : public QWidget {
   QStringList m_inputs;
   QListWidget* m_list;
   QLineEdit* m_output;
+  QComboBox* m_format;
+  QLabel* m_formatHint;
+  QWidget* m_engineOpts;
   QComboBox* m_algo;
   QComboBox* m_priority;
   QSlider* m_level;

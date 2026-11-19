@@ -24,6 +24,21 @@ std::string crc32_hex(uint32_t value);
 // ------------------------------------------------------------------- SHA-256
 std::array<uint8_t, 32> sha256(View data);
 std::array<uint8_t, 32> sha256(std::string_view text);
+// Streaming SHA-256, for hashing files too large to buffer in memory.
+class Sha256 {
+ public:
+  Sha256();
+  ~Sha256();
+  Sha256(Sha256&&) noexcept;
+  Sha256& operator=(Sha256&&) noexcept;
+  Sha256(const Sha256&) = delete;
+  Sha256& operator=(const Sha256&) = delete;
+  void update(View data);
+  std::array<uint8_t, 32> final();
+ private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
 std::array<uint8_t, 32> hmac_sha256(View key, View message);
 // Streaming HMAC-SHA256, for authenticating payloads too large to buffer.
 // Same construction as the one-shot version (RFC 2104 / RFC 4231 vectors).

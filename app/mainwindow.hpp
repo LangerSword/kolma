@@ -14,6 +14,7 @@ namespace kolma::ui {
 
 class CompressView;
 class ExtractView;
+class ToolsView;
 class BenchView;
 
 class MainWindow : public QMainWindow {
@@ -21,6 +22,8 @@ class MainWindow : public QMainWindow {
  public:
   explicit MainWindow(QWidget* parent = nullptr);
   void handleFiles(const QStringList& files);
+  void showView(const QString& name);  // headless QA: switch views by name
+  void inspectInTools(const QString& path);  // headless QA: populate Tools view
 
  protected:
   void dragEnterEvent(QDragEnterEvent* e) override;
@@ -33,6 +36,7 @@ class MainWindow : public QMainWindow {
   QStackedWidget* m_stack;
   CompressView* m_compress;
   ExtractView* m_extract;
+  ToolsView* m_tools;
   BenchView* m_bench;
   QLabel* m_statusLabel;
   QVBoxLayout* m_sidebarLay = nullptr;

@@ -146,6 +146,16 @@ std::array<uint8_t, 32> sha256(View data) {
   return sha256_final(c);
 }
 
+struct Sha256::Impl {
+  Sha256Ctx ctx;
+};
+Sha256::Sha256() : impl_(std::make_unique<Impl>()) { sha256_init(impl_->ctx); }
+Sha256::~Sha256() = default;
+Sha256::Sha256(Sha256&&) noexcept = default;
+Sha256& Sha256::operator=(Sha256&&) noexcept = default;
+void Sha256::update(View data) { sha256_update(impl_->ctx, data.data(), data.size()); }
+std::array<uint8_t, 32> Sha256::final() { return sha256_final(impl_->ctx); }
+
 std::array<uint8_t, 32> sha256(std::string_view text) {
   return sha256(View(reinterpret_cast<const uint8_t*>(text.data()), text.size()));
 }

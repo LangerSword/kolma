@@ -38,6 +38,27 @@ KOLMA_TEST(sha256_matches_fips_vectors) {
            std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
 }
 
+KOLMA_TEST(sha256_streaming_matches_one_shot) {
+  const std::string msg = "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
+  Sha256 h;
+  for (size_t i = 0; i < msg.size(); i += 7) {
+    size_t n = (msg.size() - i < 7) ? msg.size() - i : 7;
+    h.update(View(reinterpret_cast<const uint8_t*>(msg.data() + i), n));
+  }
+  CHECK_EQ(to_hex(h.final()),
+           std::string("248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1"));
+  Sha256 e;
+  CHECK_EQ(to_hex(e.final()), to_hex(sha256(std::string_view(""))));
+  std::vector<uint8_t> big(100000);
+  for (size_t i = 0; i < big.size(); ++i) big[i] = uint8_t(i * 31 + 7);
+  Sha256 s;
+  for (size_t i = 0; i < big.size(); i += 4096) {
+    size_t n = (big.size() - i < 4096) ? big.size() - i : 4096;
+    s.update(View(big.data() + i, n));
+  }
+  CHECK_EQ(to_hex(s.final()), to_hex(sha256(View(big))));
+}
+
 KOLMA_TEST(hmac_sha256_matches_rfc4231) {
   Bytes key(20, 0x0b);
   const std::string data = "Hi There";

@@ -18,6 +18,9 @@
 #include "extractview.hpp"
 #include "settingsdialog.hpp"
 #include "theme.hpp"
+#include "toolsview.hpp"
+
+#include "kolma/stdarchive.hpp"
 
 namespace kolma::ui {
 
@@ -52,14 +55,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   m_stack = new QStackedWidget;
   m_compress = new CompressView;
   m_extract = new ExtractView;
+  m_tools = new ToolsView;
   m_bench = new BenchView;
   m_stack->addWidget(m_compress);
   m_stack->addWidget(m_extract);
+  m_stack->addWidget(m_tools);
   m_stack->addWidget(m_bench);
 
   addNav("Compress", 0);
   addNav("Extract", 1);
-  addNav("Benchmark", 2);
+  addNav("Tools", 2);
+  addNav("Benchmark", 3);
   sideLay->addStretch();
 
   auto* prefs = new QPushButton("Preferences");
@@ -92,9 +98,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
   connect(m_compress, &CompressView::status, this, &MainWindow::showStatus);
   connect(m_extract, &ExtractView::status, this, &MainWindow::showStatus);
+  connect(m_tools, &ToolsView::status, this, &MainWindow::showStatus);
   connect(m_bench, &BenchView::status, this, &MainWindow::showStatus);
 
-  m_statusLabel = new QLabel("Ready. Drop files to compress, or a .kolma to extract.");
+  m_statusLabel = new QLabel("Ready. Drop files to compress, or an archive (.zip, .7z, .kolma…) to extract.");
   statusBar()->addWidget(m_statusLabel, 1);
   if (!m_nav.isEmpty()) m_nav.first()->setChecked(true);
 }
@@ -114,6 +121,20 @@ void MainWindow::showStatus(const QString& msg, bool isError) {
   m_statusLabel->setStyleSheet(QString("color:%1;").arg(isError ? Palette::bad : Palette::subtle));
 }
 
+void MainWindow::showView(const QString& name) {
+  int idx = 0;
+  if (name == "extract") idx = 1;
+  else if (name == "tools") idx = 2;
+  else if (name == "bench" || name == "benchmark") idx = 3;
+  m_stack->setCurrentIndex(idx);
+  if (idx < m_nav.size()) m_nav[idx]->setChecked(true);
+}
+
+void MainWindow::inspectInTools(const QString& path) {
+  showView("tools");
+  m_tools->inspectFile(path);
+}
+
 void MainWindow::dragEnterEvent(QDragEnterEvent* e) {
   if (e->mimeData()->hasUrls()) e->acceptProposedAction();
 }
@@ -129,8 +150,11 @@ void MainWindow::dropEvent(QDropEvent* e) {
 void MainWindow::handleFiles(const QStringList& files) {
   if (files.isEmpty()) return;
   bool allArchives = true;
-  for (const QString& f : files)
-    if (!f.endsWith(".kolma", Qt::CaseInsensitive)) allArchives = false;
+  for (const QString& f : files) {
+    bool isArchive = f.endsWith(".kolma", Qt::CaseInsensitive) ||
+                     kolma::std_is_standard(f.toStdString());
+    if (!isArchive) allArchives = false;
+  }
 
   if (allArchives && files.size() == 1) {
     m_stack->setCurrentIndex(1);
