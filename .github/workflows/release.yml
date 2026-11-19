@@ -119,9 +119,9 @@ jobs:
           # is too new"), so the AppImage is built on 22.04, not latest.
           - os: ubuntu-22.04
             platform: linux
-          # macos-15 dropped the AGL framework that Qt6Gui still links; build
-          # the GUI on macos-14, whose SDK still provides it.
-          - os: macos-14
+          # AGL is stripped from Qt's link interface in CMakeLists, so the GUI
+          # builds on macos-latest (macos-15) despite AGL being removed there.
+          - os: macos-latest
             platform: macos
           - os: windows-latest
             platform: windows

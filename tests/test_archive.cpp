@@ -300,7 +300,7 @@ KOLMA_TEST(unsafe_source_names_never_become_output_paths) {
     back.force = true;  // the fallback output is reused across iterations
     Result r = run_job(back);
     CHECK(r.ok);
-    CHECK_EQ(r.stats.output_path, path + ".out");  // fell back, did not escape
+    CHECK(kolma_test::same_file(r.stats.output_path, path + ".out"));  // fell back, did not escape
     CHECK(!std::filesystem::exists(kolma_test::temp_path("escape.txt")));
   }
 }

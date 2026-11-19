@@ -67,6 +67,21 @@ option(KOLMA_GUI "Build the Qt6 desktop app (needs Qt6 Widgets)" ON)
 if(KOLMA_GUI)
   find_package(Qt6 6.2 COMPONENTS Widgets QUIET)
   if(Qt6_FOUND)
+    if(APPLE)
+      # macOS 14+ SDKs removed the legacy AGL framework, but prebuilt Qt's
+      # exported CMake configs still list it (via WrapOpenGL and the
+      # Gui/Widgets/PrintSupport link interfaces). Qt does not need AGL, so
+      # strip it to avoid "ld: framework 'AGL' not found" on modern SDKs.
+      foreach(_qt_tgt WrapOpenGL::WrapOpenGL Qt6::Gui Qt6::Widgets Qt6::PrintSupport)
+        if(TARGET ${_qt_tgt})
+          get_target_property(_qt_libs ${_qt_tgt} INTERFACE_LINK_LIBRARIES)
+          if(_qt_libs)
+            list(FILTER _qt_libs EXCLUDE REGEX "AGL")
+            set_target_properties(${_qt_tgt} PROPERTIES INTERFACE_LINK_LIBRARIES "${_qt_libs}")
+          endif()
+        endif()
+      endforeach()
+    endif()
     add_executable(kolma-desktop
       app/main.cpp
       app/mainwindow.cpp

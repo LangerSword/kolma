@@ -37,6 +37,15 @@ inline std::string temp_dir() {
 
 inline std::string temp_path(const std::string& name) { return temp_dir() + "/" + name; }
 
+// Separator-agnostic path equality: the engine reports native separators
+// ('\' on Windows) while fixtures are built with '/', so compare by resolved
+// file identity rather than raw string.
+inline bool same_file(const std::string& a, const std::string& b) {
+  std::error_code ec;
+  bool eq = std::filesystem::equivalent(a, b, ec);
+  return !ec && eq;
+}
+
 inline void write_bytes(const std::string& path, const std::vector<uint8_t>& data) {
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   if (!data.empty()) out.write(reinterpret_cast<const char*>(data.data()), std::streamsize(data.size()));

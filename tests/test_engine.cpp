@@ -255,7 +255,7 @@ KOLMA_TEST(decompression_uses_the_recorded_source_name) {
   job.algorithm = "lz77";
   Result r = run_job(job);
   CHECK(r.ok);
-  CHECK_EQ(r.stats.output_path, in + ".kolma");
+  CHECK(kolma_test::same_file(r.stats.output_path, in + ".kolma"));
 
   // Rename the archive so the ".kolma" suffix trick cannot apply, and let the
   // engine fall back to the recorded source name.
@@ -272,7 +272,7 @@ KOLMA_TEST(decompression_uses_the_recorded_source_name) {
   back.force = true;
   Result rb = run_job(back);
   CHECK(rb.ok);
-  CHECK_EQ(rb.stats.output_path, dir + "/original-name.dat");
+  CHECK(kolma_test::same_file(rb.stats.output_path, dir + "/original-name.dat"));
 }
 
 KOLMA_TEST(progress_callbacks_report_monotonic_progress) {
