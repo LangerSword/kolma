@@ -18,7 +18,7 @@ jobs:
           cache-dependency-path: tui/go.sum
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build python3
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3 libarchive-dev
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_WARNINGS_AS_ERRORS=ON
@@ -53,6 +53,24 @@ jobs:
             echo "--json with stdout output must be refused"; exit 1
           fi
 
+      - name: Smoke-test standard-format archives (zip interop)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kolma-std/proj/sub
+          echo "hello standard formats" > /tmp/kolma-std/proj/a.txt
+          echo "nested file" > /tmp/kolma-std/proj/sub/b.txt
+          ./build/kolma compress /tmp/kolma-std/proj --format zip -o /tmp/kolma-std/out.zip --force --quiet
+          # An independent standard implementation must read what kolma produced.
+          python3 -c "import zipfile,sys; z=zipfile.ZipFile('/tmp/kolma-std/out.zip'); sys.exit(0 if z.testzip() is None else 1)"
+          ./build/kolma list /tmp/kolma-std/out.zip
+          ./build/kolma extract /tmp/kolma-std/out.zip /tmp/kolma-std/roundtrip --force --quiet
+          cmp /tmp/kolma-std/proj/a.txt /tmp/kolma-std/roundtrip/proj/a.txt
+          cmp /tmp/kolma-std/proj/sub/b.txt /tmp/kolma-std/roundtrip/proj/sub/b.txt
+          # And kolma must read a zip made by a standard tool.
+          python3 -c "import zipfile; z=zipfile.ZipFile('/tmp/kolma-std/sys.zip','w'); z.write('/tmp/kolma-std/proj/a.txt','proj/a.txt'); z.close()"
+          ./build/kolma extract /tmp/kolma-std/sys.zip /tmp/kolma-std/fromsys --force --quiet
+          cmp /tmp/kolma-std/proj/a.txt /tmp/kolma-std/fromsys/proj/a.txt
+
       - name: Build the TUI
         run: cd tui && go vet ./... && go build -o kolma-tui .
 
@@ -69,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libarchive-dev
 
       - name: Configure with sanitizers
         run: cmake -S . -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DKOLMA_SANITIZE=ON

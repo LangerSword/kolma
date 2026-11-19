@@ -49,11 +49,16 @@ jobs:
 
       - name: Install Ninja (Linux)
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libarchive-dev
 
       - name: Set up MSVC (Windows)
         if: matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Install libarchive (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: vcpkg install libarchive:x64-windows-static-md
 
       # Ninja everywhere: the Visual Studio generator fails to locate VS on the
       # windows runner, while Ninja + the msvc-dev-cmd environment is reliable.
@@ -61,9 +66,14 @@ jobs:
       - name: Configure
         shell: bash
         run: |
+          extra=()
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            extra=(-DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md)
+          fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=OFF \
             -DKOLMA_WARNINGS_AS_ERRORS=ON \
-            ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }}
+            ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }} \
+            "${extra[@]}"
 
       - name: Build the engine + CLI
         run: cmake --build build --config Release
@@ -136,17 +146,26 @@ jobs:
 
       - name: Install build tools (Linux)
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libfuse2
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libfuse2 libarchive-dev
 
       - name: Set up MSVC (Windows)
         if: matrix.platform == 'windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      - name: Install libarchive (Windows)
+        if: matrix.platform == 'windows'
+        shell: bash
+        run: vcpkg install libarchive:x64-windows-static-md
+
       - name: Configure
         shell: bash
         run: |
+          extra=()
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            extra=(-DCMAKE_TOOLCHAIN_FILE="$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md)
+          fi
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=ON \
-            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}" "${extra[@]}"
 
       - name: Build the desktop app
         run: cmake --build build --config Release --target kolma-desktop
