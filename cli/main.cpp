@@ -31,6 +31,7 @@
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
 #include "kolma/media.hpp"
+#include "kolma/multipart.hpp"
 #include "kolma/stdarchive.hpp"
 
 #include <filesystem>
@@ -83,6 +84,9 @@ struct Options {
   long long chunk_size = 0;
   long long memory_limit = 256ll << 20;
   long long limit = 0;
+  long long part_size = 0;
+  bool in_place = false;
+  long long keep_free = -1;  // -1 = engine default reserve
   std::vector<std::string> positionals;
   std::string error;
 };
@@ -142,6 +146,14 @@ Options parse_options(int argc, char** argv, int start) {
       o.format = value_of("--format");
     } else if (arg == "--quality") {
       o.quality = value_of("--quality");
+    } else if (arg == "--part-size") {
+      std::string v = value_of("--part-size");
+      if (!v.empty() && !parse_size(v, o.part_size)) o.error = "--part-size expects a size (e.g. 100M)";
+    } else if (arg == "--in-place") {
+      o.in_place = true;
+    } else if (arg == "--keep-free") {
+      std::string v = value_of("--keep-free");
+      if (!v.empty() && !parse_size(v, o.keep_free)) o.error = "--keep-free expects a size";
     } else if (arg == "--password") {
       o.password = value_of("--password");
       o.password_flag = true;
@@ -190,6 +202,8 @@ void print_usage(std::ostream& os) {
      << "  kolma decompress <archive> [options]   # -o - writes the payload to stdout\n"
      << "  kolma extract    <archive> [dest-dir]  # opens zip/7z/tar.gz/... and .kolma\n"
      << "  kolma shrink     <video|image>         # smaller file, still playable (needs ffmpeg)\n"
+     << "  kolma split      <file> --part-size N  # cut into .001/.002/… volumes\n"
+     << "  kolma join       <file.001> [-o out]   # reassemble volumes\n"
      << "  kolma list       <archive>             # show the contents of an archive\n"
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
@@ -203,6 +217,9 @@ void print_usage(std::ostream& os) {
      << "  -o, --out <path>       output path; - writes to stdout (reports go to stderr)\n"
      << "      --format <fmt>     zip | tar | tar.gz | tar.xz | tar.bz2 | 7z (universal archive)\n"
      << "      --quality <q>      shrink preset: quality | balanced | smallest\n"
+     << "      --part-size <s>    volume size for split (e.g. 100M, 4G)\n"
+     << "      --in-place         extract tar volumes, reclaiming space as it goes\n"
+     << "      --keep-free <s>    free-space reserve for --in-place (default 2G)\n"
      << "      --password <pw>    encrypt (visible in ps; prefer KOLMA_PASSWORD)\n"
      << "  -t, --threads <n>      worker threads (default: hardware concurrency)\n"
      << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes (max 64M)\n"
@@ -441,7 +458,7 @@ bool stream_file_to_stdout(const std::string& path) {
 bool is_file_command(const std::string& c) {
   return c == "analyze" || c == "inspect" || c == "info" || c == "bench" || c == "benchmark" ||
          c == "compress" || c == "c" || c == "pack" || c == "decompress" || c == "d" ||
-         c == "unpack" || c == "extract" || c == "shrink";
+         c == "unpack" || c == "extract" || c == "shrink" || c == "split" || c == "join";
 }
 
 }  // namespace
@@ -618,6 +635,26 @@ int main(int argc, char** argv) {
                            ? o.positionals[1]
                            : std::filesystem::path(input).parent_path().string();
     if (dest.empty()) dest = ".";
+    // Multipart (split-volume) archive: stream the volumes as one logical file.
+    if (kolma::is_multipart(input)) {
+      kolma::VolumeSet vs = kolma::detect_volume_set(input);
+      kolma::MultipartExtractOptions mo;
+      mo.force = o.force;
+      mo.in_place = o.in_place;
+      if (o.keep_free >= 0) mo.keep_free = uint64_t(o.keep_free);
+      std::string err;
+      if (!kolma::extract_multipart(vs, dest, mo, err, progress)) {
+        std::cerr << "kolma: " << err << "\n";
+        return 1;
+      }
+      if (o.json) {
+        std::cout << "{\"event\":\"done\",\"ok\":true,\"output\":" << jstr(dest) << "}\n";
+      } else {
+        std::printf("Extracted to %s%s\n", dest.c_str(),
+                    o.in_place ? "  (in-place: source volumes reclaimed)" : "");
+      }
+      return 0;
+    }
     if (kolma::std_is_standard(input)) {
       std::string serr;
       bool ok = kolma::std_extract(input, dest, o.force, serr, progress);
@@ -662,6 +699,48 @@ int main(int argc, char** argv) {
                   kolma::human_size(r.stats.orig_size).c_str(),
                   kolma::human_size(r.stats.comp_size).c_str(), saved);
       std::printf("Saved to %s - still plays in any player\n", r.stats.output_path.c_str());
+    }
+    return 0;
+  }
+
+  // split: cut a file into numbered byte volumes (for sharing or FAT32's 4 GiB cap).
+  if (command == "split") {
+    if (o.part_size <= 0) {
+      std::cerr << "kolma: split needs --part-size (e.g. --part-size 100M)\n";
+      return 1;
+    }
+    std::string err;
+    uint32_t n = kolma::split_file(input, uint64_t(o.part_size), err);
+    if (n == 0) {
+      std::cerr << "kolma: " << err << "\n";
+      return 1;
+    }
+    if (o.json) {
+      std::cout << "{\"event\":\"done\",\"ok\":true,\"volumes\":" << n << "}\n";
+    } else {
+      std::printf("Split into %u volumes: %s.001 … %s.%03u\n", n, input.c_str(), input.c_str(), n);
+    }
+    return 0;
+  }
+
+  // join: reassemble numbered volumes back into one file.
+  if (command == "join") {
+    kolma::VolumeSet vs = kolma::detect_volume_set(input);
+    if (vs.paths.empty()) {
+      std::cerr << "kolma: not a recognised volume set: " << input << "\n";
+      return 1;
+    }
+    std::string out = o.output.empty() ? vs.base : o.output;
+    std::string err;
+    if (!kolma::join_multipart(vs, out, o.force, err, progress)) {
+      std::cerr << "kolma: " << err << "\n";
+      return 1;
+    }
+    if (o.json) {
+      std::cout << "{\"event\":\"done\",\"ok\":true,\"output\":" << jstr(out) << "}\n";
+    } else {
+      std::printf("Joined %zu volumes into %s (%s)\n", vs.paths.size(), out.c_str(),
+                  kolma::human_size(vs.total_size).c_str());
     }
     return 0;
   }

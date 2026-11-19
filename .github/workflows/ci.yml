@@ -82,6 +82,24 @@ jobs:
           python3 -c "import os,sys; sys.exit(0 if os.path.getsize('/tmp/clip-small.mp4') < os.path.getsize('/tmp/clip.mp4') else 1)"
           ffmpeg -hide_banner -nostdin -i /tmp/clip-small.mp4 -f null - 2>/dev/null
 
+      - name: Smoke-test multipart split / join / in-place extraction
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kolma-mp/data
+          echo "volume one content" > /tmp/kolma-mp/data/a.txt
+          head -c 30000 /dev/urandom > /tmp/kolma-mp/data/b.bin
+          ./build/kolma compress /tmp/kolma-mp/data --format tar -o /tmp/kolma-mp/data.tar --force --quiet
+          ./build/kolma split /tmp/kolma-mp/data.tar --part-size 8K
+          rm /tmp/kolma-mp/data.tar
+          # join reconstructs the archive; in-place extraction streams the volumes
+          # and reclaims them as their data is committed.
+          ./build/kolma join /tmp/kolma-mp/data.tar.001 -o /tmp/kolma-mp/rejoined.tar --quiet
+          ./build/kolma extract /tmp/kolma-mp/data.tar.001 /tmp/kolma-mp/out --in-place --keep-free 0 --force --quiet
+          cmp /tmp/kolma-mp/data/a.txt /tmp/kolma-mp/out/data/a.txt
+          cmp /tmp/kolma-mp/data/b.bin /tmp/kolma-mp/out/data/b.bin
+          # in-place must have reclaimed the source volumes
+          test ! -e /tmp/kolma-mp/data.tar.001
+
       - name: Build the TUI
         run: cd tui && go vet ./... && go build -o kolma-tui .
 
