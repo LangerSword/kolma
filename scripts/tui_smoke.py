@@ -165,7 +165,9 @@ def main() -> int:
         print("  ok  fixture file listed")
 
         screen.send("\x1b[B")  # down
-        if "▸ file sample.txt" not in screen.plain():
+        # The selected row carries a cursor and an optional multi-select mark,
+        # so tolerate the mark column's spacing rather than pinning exact spaces.
+        if not re.search(r"▸\s*●?\s*file\s+sample\.txt", screen.plain()):
             fail("the cursor did not move to the second entry", screen)
         print("  ok  cursor moved")
 
