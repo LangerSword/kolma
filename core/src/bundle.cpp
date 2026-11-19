@@ -205,9 +205,14 @@ int64_t file_mtime(const fs::path& p) {
   std::error_code ec;
   auto t = fs::last_write_time(p, ec);
   if (ec) return 0;
-  auto sys = std::chrono::clock_cast<std::chrono::system_clock>(t);
+  // file_clock's epoch is implementation-defined, and std::chrono::clock_cast
+  // is absent from Apple's libc++, so calibrate against system_clock at run
+  // time: shift the file timestamp by the measured offset between the clocks.
+  using namespace std::chrono;
+  auto sys = time_point_cast<system_clock::duration>(
+      t - fs::file_time_type::clock::now() + system_clock::now());
   return static_cast<int64_t>(
-      std::chrono::duration_cast<std::chrono::seconds>(sys.time_since_epoch()).count());
+      duration_cast<seconds>(sys.time_since_epoch()).count());
 }
 
 // Reject anything that could escape the destination directory.

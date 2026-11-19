@@ -88,7 +88,7 @@ if(KOLMA_GUI)
       # Qt code is not held to the engine's -Werror conversion discipline.
       target_compile_options(kolma-desktop PRIVATE -Wno-error)
     endif()
-    install(TARGETS kolma-desktop RUNTIME DESTINATION bin)
+    install(TARGETS kolma-desktop RUNTIME DESTINATION bin BUNDLE DESTINATION .)
     message(STATUS "kolma-desktop: Qt6 ${Qt6_VERSION} found, building the GUI")
   else()
     message(STATUS "kolma-desktop: Qt6 not found, skipping the GUI")

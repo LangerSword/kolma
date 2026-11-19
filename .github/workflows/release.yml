@@ -51,12 +51,17 @@ jobs:
         if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
+      - name: Set up MSVC (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      # Ninja everywhere: the Visual Studio generator fails to locate VS on the
+      # windows runner, while Ninja + the msvc-dev-cmd environment is reliable.
+      # Single-config Ninja puts binaries in build/, not build/Release/.
       - name: Configure
         shell: bash
         run: |
-          gen="Ninja"
-          if [ "${{ matrix.platform }}" = "windows" ]; then gen="Visual Studio 17 2022"; fi
-          cmake -S . -B build -G "$gen" -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=OFF \
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=OFF \
             -DKOLMA_WARNINGS_AS_ERRORS=ON \
             ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }}
 
@@ -68,7 +73,7 @@ jobs:
         if: ${{ !matrix.cmake-arch }}
         shell: bash
         run: |
-          if [ "${{ matrix.platform }}" = "windows" ]; then ./build/Release/kolma_tests.exe; else ./build/kolma_tests; fi
+          if [ "${{ matrix.platform }}" = "windows" ]; then ./build/kolma_tests.exe; else ./build/kolma_tests; fi
 
       - name: Build the TUI
         shell: bash
@@ -89,7 +94,7 @@ jobs:
           stage=kolma-${{ matrix.platform }}-${{ matrix.arch }}
           mkdir "$stage"
           if [ "${{ matrix.platform }}" = "windows" ]; then
-            cp build/Release/kolma.exe tui/kolma-tui.exe "$stage/"
+            cp build/kolma.exe tui/kolma-tui.exe "$stage/"
           else
             cp build/kolma tui/kolma-tui "$stage/"
           fi
@@ -110,7 +115,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          # linuxdeployqt refuses hosts newer than ubuntu-22.04 ("host system
+          # is too new"), so the AppImage is built on 22.04, not latest.
+          - os: ubuntu-22.04
             platform: linux
           - os: macos-latest
             platform: macos
@@ -127,14 +134,16 @@ jobs:
 
       - name: Install build tools (Linux)
         if: matrix.platform == 'linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libfuse2t64
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libfuse2
+
+      - name: Set up MSVC (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Configure
         shell: bash
         run: |
-          gen="Ninja"
-          if [ "${{ matrix.platform }}" = "windows" ]; then gen="Visual Studio 17 2022"; fi
-          cmake -S . -B build -G "$gen" -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=ON \
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=ON \
             -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
 
       - name: Build the desktop app
@@ -154,6 +163,7 @@ jobs:
           wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O linuxdeployqt
           chmod +x linuxdeployqt
           export VERSION="${GITHUB_REF_NAME#v}"
+          export ARCH=x86_64
           export APPIMAGE_EXTRACT_AND_RUN=1
           ./linuxdeployqt AppDir/usr/share/applications/kolma.desktop -appimage -bundle-non-qt-libs -extra-plugins=imageformats,iconengines
           mv kolma*.AppImage kolma-desktop-linux-x86_64.AppImage
@@ -171,7 +181,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          Copy-Item build/Release/kolma-desktop.exe dist/
+          Copy-Item build/kolma-desktop.exe dist/
           windeployqt dist/kolma-desktop.exe --release --no-translations --compiler-runtime
           Compress-Archive -Path dist/* -DestinationPath kolma-desktop-windows-x64.zip
 
