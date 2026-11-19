@@ -30,6 +30,7 @@
 #include "kolma/bundle.hpp"
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
+#include "kolma/media.hpp"
 #include "kolma/stdarchive.hpp"
 
 #include <filesystem>
@@ -75,6 +76,7 @@ struct Options {
   std::string priority = "balanced";
   std::string output;
   std::string format;  // standard archive format: zip, tar.gz, tar.xz, tar.bz2, 7z
+  std::string quality;  // shrink preset: quality | balanced | smallest
   std::string password;
   int level = 0;
   long long threads = 0;
@@ -138,6 +140,8 @@ Options parse_options(int argc, char** argv, int start) {
       o.output = value_of("--out");
     } else if (arg == "--format") {
       o.format = value_of("--format");
+    } else if (arg == "--quality") {
+      o.quality = value_of("--quality");
     } else if (arg == "--password") {
       o.password = value_of("--password");
       o.password_flag = true;
@@ -185,6 +189,7 @@ void print_usage(std::ostream& os) {
      << "  kolma compress   <file|folder>... [options]  # --format zip for a universal archive\n"
      << "  kolma decompress <archive> [options]   # -o - writes the payload to stdout\n"
      << "  kolma extract    <archive> [dest-dir]  # opens zip/7z/tar.gz/... and .kolma\n"
+     << "  kolma shrink     <video|image>         # smaller file, still playable (needs ffmpeg)\n"
      << "  kolma list       <archive>             # show the contents of an archive\n"
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
@@ -197,6 +202,7 @@ void print_usage(std::ostream& os) {
      << "  -p, --priority <p>     maxratio | balanced | maxspeed (used when --algo is auto)\n"
      << "  -o, --out <path>       output path; - writes to stdout (reports go to stderr)\n"
      << "      --format <fmt>     zip | tar | tar.gz | tar.xz | tar.bz2 | 7z (universal archive)\n"
+     << "      --quality <q>      shrink preset: quality | balanced | smallest\n"
      << "      --password <pw>    encrypt (visible in ps; prefer KOLMA_PASSWORD)\n"
      << "  -t, --threads <n>      worker threads (default: hardware concurrency)\n"
      << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes (max 64M)\n"
@@ -435,7 +441,7 @@ bool stream_file_to_stdout(const std::string& path) {
 bool is_file_command(const std::string& c) {
   return c == "analyze" || c == "inspect" || c == "info" || c == "bench" || c == "benchmark" ||
          c == "compress" || c == "c" || c == "pack" || c == "decompress" || c == "d" ||
-         c == "unpack" || c == "extract";
+         c == "unpack" || c == "extract" || c == "shrink";
 }
 
 }  // namespace
@@ -628,6 +634,36 @@ int main(int argc, char** argv) {
     }
     kolma::Result r = kolma::extract_archive(input, dest, o.password, o.force, progress);
     return finish(r, o, true);
+  }
+
+  // shrink: perceptually re-encode a video/image smaller; it stays playable.
+  if (command == "shrink") {
+    if (!kolma::media_available()) {
+      std::cerr << "kolma: media shrinking needs ffmpeg installed and on PATH\n";
+      return 1;
+    }
+    kolma::MediaOptions mo;
+    mo.output = o.output;
+    mo.preset = o.quality.empty() ? "balanced" : o.quality;
+    mo.force = o.force;
+    kolma::Result r = kolma::shrink_media(input, mo, progress);
+    if (!r.ok) {
+      std::cerr << "kolma: " << r.error << "\n";
+      return 1;
+    }
+    if (o.json) {
+      std::cout << "{\"event\":\"done\",\"ok\":true,\"output\":" << jstr(r.stats.output_path)
+                << ",\"orig_size\":" << r.stats.orig_size
+                << ",\"new_size\":" << r.stats.comp_size
+                << ",\"ratio\":" << r.stats.ratio << "}\n";
+    } else {
+      double saved = (1.0 - r.stats.ratio) * 100.0;
+      std::printf("Shrunk %s -> %s  (%.1f%% smaller)\n",
+                  kolma::human_size(r.stats.orig_size).c_str(),
+                  kolma::human_size(r.stats.comp_size).c_str(), saved);
+      std::printf("Saved to %s - still plays in any player\n", r.stats.output_path.c_str());
+    }
+    return 0;
   }
 
   // compress: a whole folder or several inputs become one bundle archive.
