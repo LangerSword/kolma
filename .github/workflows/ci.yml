@@ -18,12 +18,12 @@ jobs:
           cache-dependency-path: tui/go.sum
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y ninja-build python3 libarchive-dev ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ninja-build python3 libarchive-dev ffmpeg qt6-base-dev
 
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DKOLMA_WARNINGS_AS_ERRORS=ON
 
-      - name: Build the engine
+      - name: Build engine, tests and desktop GUI
         run: cmake --build build
 
       - name: Engine test suite

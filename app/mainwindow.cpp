@@ -17,9 +17,11 @@
 #include "compressview.hpp"
 #include "extractview.hpp"
 #include "settingsdialog.hpp"
+#include "shrinkview.hpp"
 #include "theme.hpp"
 #include "toolsview.hpp"
 
+#include "kolma/file.hpp"
 #include "kolma/stdarchive.hpp"
 
 namespace kolma::ui {
@@ -54,18 +56,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
   m_stack = new QStackedWidget;
   m_compress = new CompressView;
+  m_shrink = new ShrinkView;
   m_extract = new ExtractView;
   m_tools = new ToolsView;
   m_bench = new BenchView;
   m_stack->addWidget(m_compress);
+  m_stack->addWidget(m_shrink);
   m_stack->addWidget(m_extract);
   m_stack->addWidget(m_tools);
   m_stack->addWidget(m_bench);
 
   addNav("Compress", 0);
-  addNav("Extract", 1);
-  addNav("Tools", 2);
-  addNav("Benchmark", 3);
+  addNav("Shrink media", 1);
+  addNav("Extract", 2);
+  addNav("Tools", 3);
+  addNav("Benchmark", 4);
   sideLay->addStretch();
 
   auto* prefs = new QPushButton("Preferences");
@@ -97,6 +102,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setCentralWidget(central);
 
   connect(m_compress, &CompressView::status, this, &MainWindow::showStatus);
+  connect(m_shrink, &ShrinkView::status, this, &MainWindow::showStatus);
   connect(m_extract, &ExtractView::status, this, &MainWindow::showStatus);
   connect(m_tools, &ToolsView::status, this, &MainWindow::showStatus);
   connect(m_bench, &BenchView::status, this, &MainWindow::showStatus);
@@ -123,9 +129,10 @@ void MainWindow::showStatus(const QString& msg, bool isError) {
 
 void MainWindow::showView(const QString& name) {
   int idx = 0;
-  if (name == "extract") idx = 1;
-  else if (name == "tools") idx = 2;
-  else if (name == "bench" || name == "benchmark") idx = 3;
+  if (name == "shrink") idx = 1;
+  else if (name == "extract") idx = 2;
+  else if (name == "tools") idx = 3;
+  else if (name == "bench" || name == "benchmark") idx = 4;
   m_stack->setCurrentIndex(idx);
   if (idx < m_nav.size()) m_nav[idx]->setChecked(true);
 }
@@ -157,14 +164,21 @@ void MainWindow::handleFiles(const QStringList& files) {
   }
 
   if (allArchives && files.size() == 1) {
-    m_stack->setCurrentIndex(1);
-    if (m_nav.size() > 1) m_nav[1]->setChecked(true);
+    showView("extract");
     m_extract->openArchive(files.first());
-  } else {
-    m_stack->setCurrentIndex(0);
-    if (!m_nav.isEmpty()) m_nav[0]->setChecked(true);
-    m_compress->addPaths(files);
+    return;
   }
+  // A single video or image goes to Shrink; anything else to Compress.
+  if (files.size() == 1) {
+    kolma::FileInfo fi = kolma::inspect_file(files.first().toStdString());
+    if (fi.type == kolma::FileType::Video || fi.type == kolma::FileType::Image) {
+      showView("shrink");
+      m_shrink->setInput(files.first());
+      return;
+    }
+  }
+  showView("compress");
+  m_compress->addPaths(files);
 }
 
 }  // namespace kolma::ui

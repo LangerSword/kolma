@@ -13,6 +13,7 @@ class QVBoxLayout;
 namespace kolma::ui {
 
 class CompressView;
+class ShrinkView;
 class ExtractView;
 class ToolsView;
 class BenchView;
@@ -35,6 +36,7 @@ class MainWindow : public QMainWindow {
 
   QStackedWidget* m_stack;
   CompressView* m_compress;
+  ShrinkView* m_shrink;
   ExtractView* m_extract;
   ToolsView* m_tools;
   BenchView* m_bench;

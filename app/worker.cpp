@@ -10,6 +10,7 @@
 #include "kolma/bundle.hpp"
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
+#include "kolma/media.hpp"
 #include "kolma/stdarchive.hpp"
 #include "kolma/util.hpp"
 
@@ -215,6 +216,14 @@ void EngineWorker::run() {
       m["rationale"] = qs(an.rationale);
       emit finished(true, QString(), m);
       return;
+    }
+    case JobSpec::ShrinkMedia: {
+      kolma::MediaOptions mo;
+      mo.output = output;
+      mo.preset = m_spec.quality.toStdString();
+      mo.force = m_spec.force;
+      r = kolma::shrink_media(m_spec.inputs.value(0).toStdString(), mo, onProgress);
+      break;
     }
     case JobSpec::Benchmark: {
       r = kolma::benchmark_file(archive, m_spec.level, size_t(m_spec.threads), 8u << 20,

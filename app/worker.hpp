@@ -13,7 +13,7 @@
 namespace kolma::ui {
 
 struct JobSpec {
-  enum Kind { CompressFile, CompressBundle, CompressStd, Extract, List, Inspect, Benchmark };
+  enum Kind { CompressFile, CompressBundle, CompressStd, Extract, List, Inspect, Benchmark, ShrinkMedia };
   Kind kind = CompressFile;
   QStringList inputs;   // files/folders to compress
   QString archive;      // extract/list source
@@ -21,6 +21,7 @@ struct JobSpec {
   QString password;
   QString algorithm = "auto";
   QString format = "zip";  // CompressStd: zip / tar / tar.gz / tar.xz / tar.bz2 / 7z
+  QString quality = "balanced";  // ShrinkMedia: quality / balanced / smallest
   int level = 0;        // 0 = auto
   int priority = 1;     // 0 maxratio, 1 balanced, 2 maxspeed
   int threads = 0;      // 0 = hardware concurrency

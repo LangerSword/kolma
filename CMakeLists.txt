@@ -100,6 +100,7 @@ if(KOLMA_GUI)
       app/main.cpp
       app/mainwindow.cpp
       app/compressview.cpp
+      app/shrinkview.cpp
       app/extractview.cpp
       app/toolsview.cpp
       app/benchview.cpp
