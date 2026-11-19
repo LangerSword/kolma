@@ -56,6 +56,36 @@ find_package(Threads REQUIRED)
 add_executable(kolma cli/main.cpp)
 target_link_libraries(kolma PRIVATE kolma_core)
 
+# ------------------------------------------------------------- desktop GUI --
+# The Qt6 app links the engine directly. Optional: without Qt6 the engine, CLI
+# and tests still build. AUTOMOC handles the Q_OBJECT classes.
+option(KOLMA_GUI "Build the Qt6 desktop app (needs Qt6 Widgets)" ON)
+if(KOLMA_GUI)
+  find_package(Qt6 6.2 COMPONENTS Widgets QUIET)
+  if(Qt6_FOUND)
+    add_executable(kolma-desktop
+      app/main.cpp
+      app/mainwindow.cpp
+      app/compressview.cpp
+      app/extractview.cpp
+      app/benchview.cpp
+      app/settingsdialog.cpp
+      app/worker.cpp
+    )
+    set_target_properties(kolma-desktop PROPERTIES AUTOMOC ON)
+    target_include_directories(kolma-desktop PRIVATE app)
+    target_link_libraries(kolma-desktop PRIVATE kolma_core Qt6::Widgets)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+      # Qt code is not held to the engine's -Werror conversion discipline.
+      target_compile_options(kolma-desktop PRIVATE -Wno-error)
+    endif()
+    install(TARGETS kolma-desktop RUNTIME DESTINATION bin)
+    message(STATUS "kolma-desktop: Qt6 ${Qt6_VERSION} found, building the GUI")
+  else()
+    message(STATUS "kolma-desktop: Qt6 not found, skipping the GUI")
+  endif()
+endif()
+
 # ---------------------------------------------------------------------- tests
 enable_testing()
 add_executable(kolma_tests
