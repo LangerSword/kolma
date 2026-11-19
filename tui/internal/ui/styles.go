@@ -28,6 +28,7 @@ var (
 	warn   = lipgloss.Color("#F0A868") // amber: archives, in-progress
 	bad    = lipgloss.Color("#F87171") // red: errors
 	info   = lipgloss.Color("#7DC4E4") // cyan: informational badges
+	violet = lipgloss.Color("#C678DD") // violet: benchmark identity
 	ink    = lipgloss.Color("#0B0F14") // text on the accent background
 
 	brandStyle  = lipgloss.NewStyle().Foreground(accent).Bold(true)
@@ -116,22 +117,37 @@ func padLeft(s string, width int) string {
 // optional right-aligned annotation (a counter, a key hint). Content lines are
 // clipped and padded to the inner width; the box is exactly width x height.
 func panel(title, right, content string, width, height int, focused bool) string {
+	return panelImpl(title, right, content, width, height, titleHue(title), focused)
+}
+
+// titleHue gives each screen its own btop-style identity accent so you know
+// where you are before reading a word. Focus is carried by the bold title.
+func titleHue(title string) lipgloss.Color {
+	switch title {
+	case "analyzer", "browse", "inspect":
+		return accent
+	case "settings", "archive":
+		return info
+	case "benchmark":
+		return violet
+	default:
+		return warn // compression / extraction / decompression runs
+	}
+}
+
+func panelImpl(title, right, content string, width, height int, borderColor lipgloss.Color, focused bool) string {
 	if width < 8 {
 		width = 8
 	}
 	if height < 3 {
 		height = 3
 	}
-	borderColor := dim
-	if focused {
-		borderColor = accent
-	}
 	border := lipgloss.NewStyle().Foreground(borderColor)
 	inner := width - 4 // two border cells, one padding cell each side
 
 	titleRendered := titleStyle.Render(title)
 	if focused {
-		titleRendered = accentStyle.Render(title)
+		titleRendered = lipgloss.NewStyle().Foreground(borderColor).Bold(true).Render(title)
 	}
 	left := "╭─ " + titleRendered + " "
 	if ansi.StringWidth(left) > width-2 {
@@ -191,7 +207,7 @@ func panelFill(title, right, content string, width, minHeight int, focused bool)
 
 // header is the top line: brand, screen title, breadcrumb, engine version.
 func header(screen, breadcrumb, version string, width int) string {
-	left := brandStyle.Render("kolma") + "  " + titleStyle.Render(screen)
+	left := brandStyle.Render("kolma") + " " + pill(strings.ToUpper(screen), ink, titleHue(screen))
 	if breadcrumb != "" {
 		left += "  " + dimStyle.Render(clipLeft(sanitize(breadcrumb), max(10, width/2)))
 	}

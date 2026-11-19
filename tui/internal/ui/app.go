@@ -1041,19 +1041,12 @@ func max64(v int64) int64 {
 	return v
 }
 
-// ratioBar renders "0.3671 ━━━━············": the number plus a 16-cell bar
-// scaled so the worst ratio fills the track. Line glyphs (not solid blocks)
-// so the bar stays legible both on the dark canvas and inside the mint
-// selected-row highlight, where block glyphs would read as black notches.
+// ratioBar renders a color-ramped ratio meter (btop-style): the number plus a
+// 16-cell line meter whose fill color encodes the value — a low (good) ratio is
+// green, a high (bad) ratio trends red. Line glyphs (not solid blocks) so the
+// bar stays legible inside the mint selected-row highlight.
 func ratioBar(ratio, maxRatio float64) string {
-	const cells = 16
-	used := 0.0
-	if maxRatio > 0 {
-		used = ratio / maxRatio * cells
-	}
-	filled := max(0, min(cells, int(used+0.5)))
-	bar := strings.Repeat("━", filled) + strings.Repeat("·", cells-filled)
-	return padRight(fmt.Sprintf("%7.4f ", ratio)+bar, 24)
+	return ratioMeter(ratio, maxRatio, 16)
 }
 
 // ------------------------------------------------------------------- inspect
@@ -1174,7 +1167,7 @@ func (m Model) viewRun() string {
 	if m.running {
 		b.WriteString("  " + m.spinner.View() + " " + dimStyle.Render(m.runKind+"ing…") + "\n")
 	}
-	b.WriteString("  " + m.bar.ViewAs(pct) + fmt.Sprintf(" %5.1f%%", pct*100) + "\n")
+	b.WriteString("  " + gradientMeter(pct, min(60, inner)) + "\n")
 	if m.running {
 		b.WriteString("\n")
 		b.WriteString(row("progress", fmt.Sprintf("%d/%d chunks", p.ChunksDone, p.ChunksTotal), "", inner) + "\n")
@@ -1310,7 +1303,7 @@ func (m Model) viewBench() string {
 			pct = float64(m.progress.ChunksDone) / float64(m.progress.ChunksTotal)
 		}
 		b.WriteString("  " + m.spinner.View() + " " + dimStyle.Render(fmt.Sprintf("running %d/%d algorithms…", m.progress.ChunksDone, m.progress.ChunksTotal)) + "\n")
-		b.WriteString("  " + m.bar.ViewAs(pct))
+		b.WriteString("  " + gradientMeter(pct, min(60, inner)))
 		return panelFill("benchmark", sanitize(m.target.Name), b.String(), width, m.contentHeight(), true)
 	}
 	if len(m.bench) == 0 {
@@ -1327,7 +1320,13 @@ func (m Model) viewBench() string {
 			}
 		}
 	}
-	content := m.benchTable.View() + "\n\n  " + dimStyle.Render("ratio = compressed / original; lower is better")
+	sparkVals := make([]float64, len(m.bench))
+	for i, r := range m.bench {
+		sparkVals[i] = r.ThroughputMBps
+	}
+	spark := brailleSpark(sparkVals, max(4, inner-13))
+	content := "  " + dimStyle.Render("throughput") + " " + spark + "\n\n" +
+		m.benchTable.View() + "\n\n  " + dimStyle.Render("ratio = compressed / original; lower is better")
 	if notes != "" {
 		for _, ln := range strings.Split(ansi.Wordwrap(sanitize(notes), max(10, inner-4), ""), "\n") {
 			content += "\n  " + subtleStyle.Render(ln)
@@ -1373,7 +1372,7 @@ func (m *Model) syncBenchTable() {
 	}
 	m.benchTable.SetRows(rows)
 	m.benchTable.SetWidth(inner)
-	m.benchTable.SetHeight(max(3, min(len(rows)+1, m.contentHeight()-7)))
+	m.benchTable.SetHeight(max(3, min(len(rows)+1, m.contentHeight()-9)))
 	m.benchTable.SetCursor(0)
 }
 

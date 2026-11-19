@@ -156,7 +156,7 @@ def main() -> int:
     print(f"driving {tui} against {engine} in {workdir}")
     screen = Screen([tui, "--bin", engine], workdir)
     try:
-        if not screen.wait_for("kolma  browse"):
+        if not screen.wait_for("kolma  BROWSE"):
             fail("the browser frame never rendered", screen)
         print("  ok  browser renders")
 
@@ -165,9 +165,10 @@ def main() -> int:
         print("  ok  fixture file listed")
 
         screen.send("\x1b[B")  # down
-        # The selected row carries a cursor and an optional multi-select mark,
-        # so tolerate the mark column's spacing rather than pinning exact spaces.
-        if not re.search(r"▸\s*●?\s*file\s+sample\.txt", screen.plain()):
+        # The selected row carries a cursor, an optional multi-select mark and a
+        # file-type icon, so match the cursor-to-name span without pinning the
+        # exact glyph/spacing.
+        if not re.search(r"▸.*sample\.txt", screen.plain()):
             fail("the cursor did not move to the second entry", screen)
         print("  ok  cursor moved")
 
@@ -178,7 +179,7 @@ def main() -> int:
 
         screen.send(".")
         screen.send("?")
-        if not screen.wait_for("kolma  help"):
+        if not screen.wait_for("kolma  HELP"):
             fail("the help screen did not render", screen)
         if "pluggable compression engine" not in screen.plain():
             fail("the help screen is missing its body", screen)

@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/LangerSword/kolma/tui/internal/core"
 )
@@ -41,38 +42,38 @@ func (d entryDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	}
 	inner := m.Width()
 	name := sanitize(e.entry.Name)
-	kind := "file"
 	if e.entry.IsDir {
-		kind = "dir "
 		name += "/"
-	} else if e.entry.IsArchive {
-		kind = "arc "
 	}
+	icon, iconColor := fileType(e.entry.Name, e.entry.IsDir, e.entry.IsArchive)
+	iconW := ansi.StringWidth(icon)
 	size := core.HumanSize(uint64(max64(e.entry.Size)))
-	nameW := max(8, inner-19)
+	// cursor(1) mark(1) sp icon(iconW) sp name sp size(10)
+	nameW := max(8, inner-15-iconW)
 	nameClipped := padRight(clip(name, nameW), nameW)
 	mark := " "
 	if e.marked {
 		mark = "●"
 	}
+	sizeStr := padLeft(size, 10)
 	if index == m.Index() {
-		raw := fmt.Sprintf("▸%s %s %s %s", mark, kind, nameClipped, padLeft(size, 10))
+		raw := "▸" + mark + " " + icon + " " + nameClipped + " " + sizeStr
 		fmt.Fprint(w, selectedStyle.Render(padRight(raw, inner)))
 		return
 	}
-	kindStyled := dimStyle.Render(kind)
-	nameStyled := textStyle.Render(nameClipped)
+	iconStyled := lipgloss.NewStyle().Foreground(iconColor).Render(icon)
+	// Color the name by type too, so the semantic system reads even where a
+	// Nerd Font glyph is unavailable: dirs mint, archives amber, code cyan,
+	// media violet, text neutral.
+	nameStyled := lipgloss.NewStyle().Foreground(iconColor).Render(nameClipped)
 	if e.entry.IsDir {
-		kindStyled = accentStyle.Render(kind)
-		nameStyled = accentStyle.Render(nameClipped)
-	} else if e.entry.IsArchive {
-		kindStyled = warnStyle.Render(kind)
+		nameStyled = lipgloss.NewStyle().Foreground(iconColor).Bold(true).Render(nameClipped)
 	}
 	markStyled := dimStyle.Render(mark)
 	if e.marked {
 		markStyled = accentStyle.Render(mark)
 	}
-	fmt.Fprintf(w, " %s %s %s %s", markStyled, kindStyled, nameStyled, dimStyle.Render(padLeft(size, 10)))
+	fmt.Fprintf(w, " %s %s %s %s", markStyled, iconStyled, nameStyled, dimStyle.Render(sizeStr))
 }
 
 // newBrowser builds the bubbles/list browser with the brand palette and a
