@@ -43,6 +43,7 @@ add_library(kolma_core STATIC
   core/src/archive.cpp
   core/src/engine.cpp
   core/src/bundle.cpp
+  core/src/stdarchive.cpp
   core/src/algorithms/store.cpp
   core/src/algorithms/rle.cpp
   core/src/algorithms/huffman.cpp
@@ -53,6 +54,18 @@ add_library(kolma_core STATIC
 )
 target_include_directories(kolma_core PUBLIC core/include)
 target_link_libraries(kolma_core PUBLIC kolma_flags Threads::Threads)
+
+# Standard-format archives (zip / tar / tar.gz / tar.xz / 7z) via libarchive.
+# Optional: when present, kolma produces and opens universally recognised
+# archives; without it the native .kolma engine still builds and works.
+find_package(LibArchive QUIET)
+if(LibArchive_FOUND)
+  target_compile_definitions(kolma_core PUBLIC KOLMA_HAVE_LIBARCHIVE)
+  target_link_libraries(kolma_core PUBLIC LibArchive::LibArchive)
+  message(STATUS "kolma: libarchive ${LibArchive_VERSION} found - standard formats enabled")
+else()
+  message(STATUS "kolma: libarchive not found - standard formats disabled")
+endif()
 
 find_package(Threads REQUIRED)
 
@@ -125,6 +138,7 @@ add_executable(kolma_tests
   tests/test_engine.cpp
   tests/test_analyzer.cpp
   tests/test_bundle.cpp
+  tests/test_stdarchive.cpp
 )
 target_link_libraries(kolma_tests PRIVATE kolma_core)
 add_test(NAME kolma_tests COMMAND kolma_tests)

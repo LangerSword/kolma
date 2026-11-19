@@ -30,6 +30,7 @@
 #include "kolma/bundle.hpp"
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
+#include "kolma/stdarchive.hpp"
 
 #include <filesystem>
 
@@ -73,6 +74,7 @@ struct Options {
   std::string algorithm = "auto";
   std::string priority = "balanced";
   std::string output;
+  std::string format;  // standard archive format: zip, tar.gz, tar.xz, tar.bz2, 7z
   std::string password;
   int level = 0;
   long long threads = 0;
@@ -134,6 +136,8 @@ Options parse_options(int argc, char** argv, int start) {
       o.priority = value_of("--priority");
     } else if (arg == "--out" || arg == "-o") {
       o.output = value_of("--out");
+    } else if (arg == "--format") {
+      o.format = value_of("--format");
     } else if (arg == "--password") {
       o.password = value_of("--password");
       o.password_flag = true;
@@ -178,9 +182,9 @@ Options parse_options(int argc, char** argv, int start) {
 void print_usage(std::ostream& os) {
   os << "kolma " << kVersion << " -- a pluggable compression engine\n\n"
      << "usage:\n"
-     << "  kolma compress   <file|folder>... [options]  # folders/many files -> one bundle\n"
+     << "  kolma compress   <file|folder>... [options]  # --format zip for a universal archive\n"
      << "  kolma decompress <archive> [options]   # -o - writes the payload to stdout\n"
-     << "  kolma extract    <archive> [dest-dir]  # untar a bundle / restore a single file\n"
+     << "  kolma extract    <archive> [dest-dir]  # opens zip/7z/tar.gz/... and .kolma\n"
      << "  kolma list       <archive>             # show the contents of an archive\n"
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
@@ -192,6 +196,7 @@ void print_usage(std::ostream& os) {
      << "  -l, --level <1-9>      effort; 1 = fastest, 9 = best ratio\n"
      << "  -p, --priority <p>     maxratio | balanced | maxspeed (used when --algo is auto)\n"
      << "  -o, --out <path>       output path; - writes to stdout (reports go to stderr)\n"
+     << "      --format <fmt>     zip | tar | tar.gz | tar.xz | tar.bz2 | 7z (universal archive)\n"
      << "      --password <pw>    encrypt (visible in ps; prefer KOLMA_PASSWORD)\n"
      << "  -t, --threads <n>      worker threads (default: hardware concurrency)\n"
      << "      --chunk-size <s>   bytes per chunk, accepts 64K / 4M suffixes (max 64M)\n"
@@ -329,6 +334,50 @@ int finish(const kolma::Result& r, const Options& o, bool human_report) {
     }
   }
   return r.ok ? 0 : 1;
+}
+
+// Plain-language report for standard-format (zip/tar/7z) operations. The engine's
+// format_stats is full of chunk/CRC/thread detail that means nothing to someone
+// who just wants a .zip they can double-click, so keep this short and human.
+int report_std(const kolma::Result& r, const Options& o, bool is_extract) {
+  if (o.json) {
+    std::ostringstream os;
+    os << "{\"event\":\"done\",\"ok\":" << (r.ok ? "true" : "false");
+    if (!r.error.empty()) os << ",\"error\":" << jstr(r.error);
+    if (r.ok) {
+      os << ",\"output\":" << jstr(r.stats.output_path)
+         << ",\"format\":" << jstr(r.stats.algorithm)
+         << ",\"orig_size\":" << r.stats.orig_size
+         << ",\"comp_size\":" << r.stats.comp_size;
+      if (r.stats.orig_size) os << ",\"ratio\":" << r.stats.ratio;
+    }
+    os << "}";
+    std::cout << os.str() << "\n";
+    return r.ok ? 0 : 1;
+  }
+  clear_progress_line(o.quiet);
+  if (!r.ok) {
+    std::cerr << "kolma: " << r.error << "\n";
+    return 1;
+  }
+  if (is_extract) {
+    std::cout << "Extracted to " << r.stats.output_path << "\n";
+  } else {
+    std::cout << "Created " << r.stats.output_path << "  (" << r.stats.algorithm << ")\n";
+    if (r.stats.orig_size) {
+      std::cout << "  " << kolma::human_size(r.stats.orig_size) << " -> "
+                << kolma::human_size(r.stats.comp_size);
+      double saved = 100.0 * (1.0 - r.stats.ratio);
+      if (saved > 0.05) {
+        char buf[32];
+        std::snprintf(buf, sizeof buf, "%.1f", saved);
+        std::cout << "  (" << buf << "% smaller)";
+      }
+      std::cout << "\n";
+    }
+    std::cout << "  Opens in any archive tool or file manager.\n";
+  }
+  return 0;
 }
 
 // A named temporary file that cleans itself up. Used to spool stdin/stdout
@@ -505,6 +554,32 @@ int main(int argc, char** argv) {
 
   // list: show what is inside an archive (a bundle or a single file).
   if (command == "list" || command == "ls") {
+    if (kolma::std_is_standard(input)) {
+      std::vector<kolma::StdEntry> se;
+      std::string serr;
+      if (!kolma::std_list(input, se, serr)) {
+        std::cerr << "kolma: " << serr << "\n";
+        return 1;
+      }
+      if (o.json) {
+        std::cout << "{\"event\":\"done\",\"ok\":true,\"entries\":[";
+        for (size_t i = 0; i < se.size(); ++i) {
+          if (i) std::cout << ",";
+          std::cout << "{\"path\":" << jstr(se[i].path) << ",\"size\":" << se[i].size
+                    << ",\"is_dir\":" << (se[i].is_dir ? "true" : "false") << "}";
+        }
+        std::cout << "]}\n";
+      } else {
+        uint64_t total = 0;
+        for (const auto& e : se) {
+          std::printf("%12s  %s\n", kolma::human_size(e.size).c_str(), e.path.c_str());
+          total += e.size;
+        }
+        std::printf("\n%zu entries, %s uncompressed\n", se.size(),
+                    kolma::human_size(total).c_str());
+      }
+      return 0;
+    }
     std::vector<kolma::BundleEntry> entries;
     std::string err;
     if (!kolma::list_bundle(input, o.password, entries, err)) {
@@ -537,12 +612,86 @@ int main(int argc, char** argv) {
                            ? o.positionals[1]
                            : std::filesystem::path(input).parent_path().string();
     if (dest.empty()) dest = ".";
+    if (kolma::std_is_standard(input)) {
+      std::string serr;
+      bool ok = kolma::std_extract(input, dest, o.force, serr, progress);
+      kolma::Result r;
+      r.ok = ok;
+      r.error = serr;
+      if (ok) {
+        r.stats.output_path = dest;
+        r.stats.restoring = true;
+        r.stats.verified = true;
+        r.stats.algorithm_name = "standard archive";
+      }
+      return report_std(r, o, true);
+    }
     kolma::Result r = kolma::extract_archive(input, dest, o.password, o.force, progress);
     return finish(r, o, true);
   }
 
   // compress: a whole folder or several inputs become one bundle archive.
   if (command == "compress" || command == "c" || command == "pack") {
+    // Standard-format routing: --format zip/tar.gz/... or a standard output
+    // extension produces a universally recognised archive that any OS or tool
+    // can open. Without it, compress keeps using the native .kolma engine.
+    std::string std_fmt = o.format;
+    if (std_fmt.empty() && !o.output.empty())
+      std_fmt = kolma::std_format_from_extension(o.output);
+    if (!std_fmt.empty() && std_fmt != "kolma") {
+      if (!kolma::std_formats_available()) {
+        std::cerr << "kolma: standard formats need libarchive (not built in)\n";
+        return 1;
+      }
+      std::vector<std::string> pack_inputs = o.positionals;
+      for (auto& p : pack_inputs)
+        if (p == "-") p = input;  // stdin was spooled to a real file
+      std::string out = o.output;
+      if (out.empty()) {
+        std::filesystem::path first(pack_inputs.front());
+        std::string name = first.filename().string();
+        if (name.empty()) name = "archive";
+        std::string ext = std_fmt == "tar.gz" ? ".tar.gz"
+                        : std_fmt == "tar.xz" ? ".tar.xz"
+                        : std_fmt == "tar.bz2" ? ".tar.bz2"
+                                               : "." + std_fmt;
+        std::filesystem::path parent = first.parent_path();
+        out = (parent.empty() ? std::filesystem::path(name + ext) : parent / (name + ext)).string();
+      }
+      kolma::StdPackOptions sopts;
+      sopts.format = std_fmt;
+      sopts.level = o.level > 0 ? o.level : 6;
+      sopts.force = o.force;
+      std::string serr;
+      bool ok = kolma::std_pack(pack_inputs, out, sopts, serr, progress);
+      kolma::Result r;
+      r.ok = ok;
+      r.error = serr;
+      if (ok) {
+        std::error_code ec;
+        r.stats.output_path = out;
+        r.stats.comp_size = std::filesystem::file_size(out, ec);
+        r.stats.algorithm = std_fmt;
+        r.stats.algorithm_name = std_fmt + " (standard)";
+        r.stats.verified = true;
+        r.stats.bundle = pack_inputs.size() > 1;
+        uint64_t orig = 0;
+        for (const auto& p : pack_inputs) {
+          std::error_code ec2;
+          if (std::filesystem::is_directory(p, ec2)) {
+            for (auto it = std::filesystem::recursive_directory_iterator(p, ec2);
+                 it != std::filesystem::recursive_directory_iterator(); it.increment(ec2)) {
+              if (it->is_regular_file(ec2)) orig += it->file_size(ec2);
+            }
+          } else if (std::filesystem::is_regular_file(p, ec2)) {
+            orig += std::filesystem::file_size(p, ec2);
+          }
+        }
+        r.stats.orig_size = orig;
+        r.stats.ratio = orig ? double(r.stats.comp_size) / double(orig) : 1.0;
+      }
+      return report_std(r, o, false);
+    }
     bool bundle = o.positionals.size() > 1;
     if (!bundle && input != "-") {
       std::error_code ec;
