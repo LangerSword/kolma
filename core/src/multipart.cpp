@@ -342,6 +342,10 @@ std::string logical_kind(const VolumeSet& vs) {
 // Delete volumes whose data is committed plus a safety margin (in-place only).
 void reclaim(ReadCtx& c, bool final) {
   if (!c.in_place) return;
+  // Windows refuses to delete a file that still has an open handle; release ours
+  // before removing volumes. mp_read reopens the current volume on demand.
+  if (c.in.is_open()) c.in.close();
+  c.cur_vol = SIZE_MAX;
   const uint64_t margin = 16ull << 20;  // far larger than libarchive read-ahead
   for (size_t i = 0; i < c.vs->paths.size(); ++i) {
     if (c.deleted[i]) continue;
