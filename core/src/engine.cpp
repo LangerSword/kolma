@@ -1,6 +1,7 @@
 #include "kolma/engine.hpp"
 
 #ifdef _WIN32
+#include <windows.h>
 #include <fcntl.h>
 #include <io.h>
 #else
@@ -42,7 +43,18 @@ double rate_mbps(uint64_t bytes, double elapsed_ms) {
 inline int fd_open(const char* path) { return ::_open(path, _O_RDONLY | _O_BINARY); }
 inline void fd_close(int fd) { ::_close(fd); }
 inline long long fd_pread(int fd, void* dst, size_t len, long long off) {
-  return ::_pread(fd, dst, static_cast<unsigned int>(len), off);
+  // The MSVC CRT has no _pread. ReadFile with an OVERLAPPED offset reads at a
+  // fixed position without moving the file pointer, so worker threads can
+  // share one descriptor exactly like POSIX pread (this is the same approach
+  // Rust's std uses for seek_read on Windows).
+  HANDLE h = reinterpret_cast<HANDLE>(::_get_osfhandle(fd));
+  if (h == INVALID_HANDLE_VALUE) return -1;
+  OVERLAPPED ov{};
+  ov.Offset = static_cast<DWORD>(static_cast<unsigned long long>(off) & 0xFFFFFFFFull);
+  ov.OffsetHigh = static_cast<DWORD>(static_cast<unsigned long long>(off) >> 32);
+  DWORD got = 0;
+  if (!::ReadFile(h, dst, static_cast<DWORD>(len), &got, &ov)) return -1;
+  return static_cast<long long>(got);
 }
 #else
 inline int fd_open(const char* path) { return ::open(path, O_RDONLY); }
