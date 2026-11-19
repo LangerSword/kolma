@@ -45,7 +45,7 @@ ToolsView::ToolsView(QWidget* parent) : QWidget(parent) {
   auto* pickRow = new QHBoxLayout;
   m_path = new QLineEdit;
   m_path->setReadOnly(true);
-  m_path->setPlaceholderText("Choose a file to see what it is, whether it will compress, and its checksums");
+  m_path->setPlaceholderText("Choose a file to inspect");
   auto* choose = new QPushButton("Choose file…");
   m_inspectBtn = new QPushButton("Inspect");
   m_inspectBtn->setObjectName("primary");
