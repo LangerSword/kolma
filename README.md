@@ -3,8 +3,10 @@
 **A compression engine that shows its work — with a desktop app, a terminal
 UI, and a CLI on top.** Seven methods behind one interface, an analyser that
 measures before it commits, a parallel chunk engine underneath, authenticated
-encryption, and folders bundled into a single archive. Runs on Linux, macOS
-and Windows.
+encryption, and folders bundled into a single archive. It also writes standard
+`.zip`/`.tar`/`.7z`, opens the archives everyone already has, shrinks videos and
+images perceptually, and splits big files into volumes it can extract in place.
+Runs on Linux, macOS and Windows.
 
 [![ci](https://github.com/LangerSword/kolma/actions/workflows/ci.yml/badge.svg)](https://github.com/LangerSword/kolma/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/LangerSword/kolma)](https://github.com/LangerSword/kolma/releases/latest)
@@ -28,9 +30,10 @@ and vision-checked.
 
 Three ways to use the same engine:
 
-- **Desktop app** (`kolma-desktop`, Qt6) — drag files or folders in, pick a
-  password if you want one, press Compress. Open an archive to see its contents
-  and integrity, then Extract. No flags, no jargon. Linux AppImage, macOS DMG,
+- **Desktop app** (`kolma-desktop`, Qt6) — drag files or folders in and press
+  Compress (ZIP by default), shrink a video or image, open any archive to see its
+  contents and integrity then Extract, and use the Tools view for checksums,
+  file inspection and splitting. No flags, no jargon. Linux AppImage, macOS DMG,
   Windows zip.
 - **Terminal UI** (`kolma-tui`, Go/Charm) — a file manager with multi-select,
   fuzzy filter, the analyser's evidence, and a benchmark of all seven methods.
@@ -125,8 +128,10 @@ make            # builds the C++ engine and the Go interface
 make check      # unit tests, Go integration tests, and a pty-driven TUI test
 
 ./build/kolma compress some-file.bin        # auto: the Analyzer picks a method
-./build/kolma compress my-folder/           # a whole folder -> one bundle
-./build/kolma compress a.txt b.txt c.txt    # several files -> one bundle
+./build/kolma compress my-folder/ -o out.zip   # a folder -> a standard ZIP
+./build/kolma extract anyone-else.zip out/  # opens zip/7z/tar.gz too, not just .kolma
+./build/kolma shrink big-video.mp4          # smaller, still playable (needs ffmpeg)
+./build/kolma split huge.iso --part-size 4G # .001/.002/… volumes for FAT32/sharing
 ./build/kolma list archive.kolma            # see what's inside
 ./build/kolma extract archive.kolma out/    # untar a bundle / restore a file
 ./tui/kolma-tui                             # the terminal interface
@@ -153,21 +158,32 @@ KOLMA_PASSWORD=pw kolma compress - < secret.txt \
 subprocess, no flags. It is the same dark editorial design as the terminal UI,
 built for people who just want to compress and extract things.
 
-| compress | extract |
+| compress | shrink media |
 | --- | --- |
-| ![compress](docs/screenshots/gui-compress.png) | ![extract](docs/screenshots/gui-extract.png) |
+| ![compress](docs/screenshots/gui-compress.png) | ![shrink](docs/screenshots/gui-shrink.png) |
+
+| extract | tools |
+| --- | --- |
+| ![extract](docs/screenshots/gui-extract.png) | ![tools](docs/screenshots/gui-tools.png) |
 
 - **Drag and drop.** Drop files or a folder anywhere on the window to stage them
   for compression; drop a `.kolma` archive and it opens in Extract instead. The
   window routes each drop to the right place.
-- **Compress.** Pick a method (or leave it on Auto and let the Analyzer decide),
-  set a level, optionally toggle a password, and press Compress. A live progress
-  bar runs while the engine works off the GUI thread; the result card shows the
-  ratio, space saved, throughput and checksum, with an "Open folder" button.
-- **Extract.** Open an archive to see its metadata, integrity status and full
-  contents list before you commit. Choose a destination, enter the password if
-  it is encrypted, and Extract. Bundles untar; single files restore under their
-  recorded name.
+- **Compress.** Defaults to a standard ZIP anyone can open; switch to the native
+  `.kolma` format to reveal the method/level/password knobs (Auto lets the
+  Analyzer decide). A live progress bar runs while the engine works off the GUI
+  thread; the result card reports the space saved in plain language, with an
+  "Open folder" button.
+- **Extract.** Open a `.zip`, `.7z`, `.tar.gz`, a split `.001` set or a `.kolma`
+  to see its metadata, integrity status and full contents list before you commit.
+  Choose a destination, enter the password if it is encrypted, and Extract.
+  Bundles untar; single files restore under their recorded name.
+- **Shrink media.** Drop a video or image, pick a quality preset, and Shrink. It
+  re-encodes through FFmpeg so the file gets much smaller and stays directly
+  playable; a before/after card shows the space saved.
+- **Tools.** Inspect any file (type, entropy, whether it will compress, CRC-32 +
+  SHA-256), peek inside any archive without extracting, and split a file into
+  numbered volumes with friendly part-size presets (1 MB … 4 GB FAT32-safe).
 - **Benchmark.** Race all seven methods on the same input and see ratio and
   throughput side by side.
 - **Preferences.** Default method, level, thread count and theme live in a small
@@ -245,9 +261,12 @@ command line, so it does not appear in `ps`.
 ## The CLI
 
 ```
-kolma compress   <file|folder>... [options]  # folders/many files -> one bundle; - is stdin
-kolma decompress <archive> [options]   # raw payload; also: d, unpack
-kolma extract    <archive> [dest-dir]  # untar a bundle / restore a single file
+kolma compress   <file|folder>... [options]  # -> ZIP by default, or .kolma; - is stdin
+kolma decompress <archive> [options]   # raw .kolma payload; also: d, unpack
+kolma extract    <archive> [dest-dir]  # zip/7z/tar.gz/.kolma and split .001 sets
+kolma shrink     <video|image>         # perceptual re-encode, still playable (ffmpeg)
+kolma split      <file> --part-size N  # cut into .001/.002/… volumes
+kolma join       <file.001> [-o out]   # reassemble volumes
 kolma list       <archive>             # show the contents of an archive
 kolma analyze    <file>                # the Analyzer's verdict and its evidence
 kolma bench      <file>                # every method against the same input
@@ -262,6 +281,11 @@ kolma version
 | `-l, --level <1-9>` | effort; 1 is fastest, 9 is best ratio |
 | `-p, --priority <p>` | `maxratio`, `balanced`, `maxspeed` (used when `--algo` is `auto`) |
 | `-o, --out <path>` | output path; `-` writes the payload to stdout (reports go to stderr) |
+| `--format <fmt>` | `zip` (default), `tar`, `tar.gz`, `tar.xz`, `tar.bz2`, `7z`, or `kolma` |
+| `--quality <q>` | shrink preset: `quality`, `balanced`, `smallest` |
+| `--part-size <s>` | volume size for `split` (e.g. `100M`, `4G`) |
+| `--in-place` | extract tar volumes, reclaiming space as it goes |
+| `--keep-free <s>` | free-space reserve for `--in-place` (default `2G`) |
 | `--password <pw>` | encrypt; visible in `ps`, so prefer `KOLMA_PASSWORD` |
 | `-t, --threads <n>` | worker threads, default is hardware concurrency |
 | `--chunk-size <s>` | bytes per chunk, accepts `64K` / `4M` suffixes (max `64M`) |
@@ -277,6 +301,31 @@ The `--json` mode is the contract the interface depends on, and it is stable:
 $ kolma compress corpus.txt --json 2>/dev/null | head -c 200
 {"event":"done","ok":true,"stats":{"algorithm":"lz77",...,"verified":true},"analysis":{...}}
 ```
+
+## Universal formats, media and volumes
+
+**Standard archives, not a dead end.** By default `compress` writes a `.zip`
+that any OS or tool opens; `--format` also gives `tar`, `tar.gz`, `tar.xz`,
+`tar.bz2` and `7z` (via libarchive). `extract` and `list` read those formats back,
+so kolma is useful even for archives it did not create. The native `.kolma`
+container is still there when you want authenticated encryption and per-chunk
+CRC verification — it is now a choice, not a requirement.
+
+**Shrinking media is different from archiving it.** A zip of an MP4 or JPEG
+barely shrinks, because the media is already entropy-coded. `kolma shrink`
+re-encodes it perceptually through FFmpeg (H.264/AAC for video, JPEG for images)
+at a quality preset you choose, trading a little quality for a lot of size — and
+the result still plays in any player. It needs `ffmpeg` on PATH.
+
+**Split volumes, extracted in place.** `split` cuts any file into `.001/.002/…`
+byte volumes (for FAT32's 4 GiB cap or chunked sharing); `join` puts them back
+together. `extract` on a `.001` streams the whole set as one logical archive
+without writing a joined copy. For forward-streaming tar sets, `--in-place`
+deletes each volume once its data is committed plus a safety margin, so you do
+not need archive-size + extracted-size free at once; a pre-flight check and a
+`--keep-free` reserve (default 2 GiB) guard against running out. zip/7z keep
+their index at the end and need to seek backwards, so in-place is refused for
+them — they still extract normally from volumes.
 
 ## Algorithms
 
@@ -390,7 +439,7 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 ## Testing
 
 ```sh
-make test        # 82 C++ tests
+make test        # 100 C++ tests
 make tui-test    # 44 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
@@ -510,7 +559,7 @@ method within 15% of the best ratio if it is faster.
 ## Repository layout
 
 ```
-core/include/kolma/     public headers: util, bitio, file, algorithm, analyzer, archive, engine, bundle
+core/include/kolma/     public headers: util, bitio, file, algorithm, analyzer, archive, engine, bundle, stdarchive, media, multipart
 core/src/               the entities; src/algorithms/ holds one file per method
 cli/main.cpp            the command line front end and the JSON contract
 app/                    the Qt6 desktop app (links kolma_core directly; data/ holds the icon + .desktop)

@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kolma - a compression engine that shows its work</title>
-<meta name="description" content="A compression engine that shows its work: a Qt6 desktop app, a Go terminal UI and a CLI over one auditable C++20 engine. Seven methods, an analyser that measures before it commits, authenticated encryption, folder bundles. Linux, macOS, Windows. Fuzz-tested, MIT licensed.">
+<meta name="description" content="A compression engine that shows its work: a Qt6 desktop app, a Go terminal UI and a CLI over one auditable C++20 engine. Seven methods, authenticated encryption, standard zip/tar/7z, video & image shrinking, split volumes extracted in place. Linux, macOS, Windows. Fuzz-tested, MIT licensed.">
 <meta property="og:title" content="kolma - a compression engine that shows its work">
-<meta property="og:description" content="A desktop app, terminal UI and CLI over one auditable C++20 compression engine. Seven methods, authenticated encryption, folder bundles. Linux, macOS, Windows.">
+<meta property="og:description" content="A desktop app, terminal UI and CLI over one auditable C++20 compression engine. Seven methods, authenticated encryption, standard zip/tar/7z, media shrinking, split volumes. Linux, macOS, Windows.">
 <meta property="og:image" content="https://langersword.github.io/kolma/screenshots/gui-compress.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
@@ -250,7 +250,7 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
   <div class="wrap hero-grid">
     <div>
       <h1>Compression that <em>shows its work.</em></h1>
-      <p class="sub">A desktop app, a terminal UI and a CLI over one auditable C++20 engine. Seven methods, an analyser that measures before it commits, authenticated encryption, and folders bundled into a single archive. Linux, macOS and Windows.</p>
+      <p class="sub">A desktop app, a terminal UI and a CLI over one auditable C++20 engine. Seven methods, an analyser that measures before it commits, authenticated encryption, standard zip/tar/7z, perceptual media shrinking, and split volumes extracted in place. Linux, macOS and Windows.</p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#install">Download the app</a>
         <a class="btn btn-ghost" href="https://github.com/LangerSword/kolma">View on GitHub</a>
@@ -266,7 +266,7 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
 <div class="stats">
   <div class="wrap stats-in">
     <div class="stat"><b>7</b><span>compression methods, one contract</span></div>
-    <div class="stat"><b>126</b><span>engine and integration tests</span></div>
+    <div class="stat"><b>144</b><span>engine and integration tests</span></div>
     <div class="stat"><b>416k</b><span>fuzz runs, zero crashes</span></div>
     <div class="stat"><b>3</b><span>operating systems, checksummed builds</span></div>
   </div>
@@ -319,8 +319,21 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
       </div>
       <div class="cell">
         <h3>Folders become one archive</h3>
-        <p>Compress a whole folder or a multi-file selection into a single <code>.kolma</code> bundle — a real ustar tar inside the same authenticated container. List the contents without extracting, and extract refuses any path that could escape the destination.</p>
+        <p>Compress a folder or a multi-file selection into a standard <code>.zip</code> anyone can open — or the authenticated <code>.kolma</code> container. List contents without extracting; extract refuses any path that could escape the destination.</p>
         <a class="cell-link" href="screenshots/tui-contents.png">see a bundle's contents</a>
+      </div>
+      <div class="cell">
+        <h3>Opens the archives you already have</h3>
+        <p><code>.zip</code>, <code>.7z</code>, <code>.tar.gz</code>, <code>.tar.xz</code>, <code>.tar.bz2</code> — extract and list them, not just <code>.kolma</code>. Writes standard formats too, so your files are never locked in.</p>
+      </div>
+      <div class="cell cell-accent">
+        <h3>Shrink video &amp; images</h3>
+        <div class="big-num">still playable</div>
+        <p>Archiving an MP4 barely shrinks it. kolma re-encodes media perceptually through FFmpeg at a quality preset you pick — much smaller, and it still plays in any player.</p>
+      </div>
+      <div class="cell">
+        <h3>Split big files, extract in place</h3>
+        <p>Cut a file into <code>.001/.002/…</code> volumes for FAT32 or sharing. Extract a split tar in place, reclaiming each volume as its data lands — no need for double the disk space.</p>
       </div>
       <div class="cell tall">
         <h3>Authenticated encryption</h3>

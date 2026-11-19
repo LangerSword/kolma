@@ -1,5 +1,6 @@
 #include "toolsview.hpp"
 
+#include <QComboBox>
 #include <QDateTime>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -86,6 +87,50 @@ ToolsView::ToolsView(QWidget* parent) : QWidget(parent) {
 
   connect(choose, &QPushButton::clicked, this, &ToolsView::chooseFile);
   connect(m_inspectBtn, &QPushButton::clicked, this, &ToolsView::inspect);
+
+  // ---- Split into volumes -------------------------------------------------
+  auto* splitBox = new QGroupBox("Split into volumes");
+  auto* sl = new QVBoxLayout(splitBox);
+  sl->setSpacing(10);
+  auto* splitDesc = new QLabel(
+      "Cut a large file into numbered parts (.001, .002, …) for sharing or a FAT32 "
+      "drive. Extract or rejoin them later — the original is left untouched.");
+  splitDesc->setObjectName("sub");
+  splitDesc->setWordWrap(true);
+  sl->addWidget(splitDesc);
+  auto* splitPickRow = new QHBoxLayout;
+  m_splitPath = new QLineEdit;
+  m_splitPath->setReadOnly(true);
+  m_splitPath->setPlaceholderText("Choose a file to split");
+  auto* splitChoose = new QPushButton("Choose file…");
+  splitPickRow->addWidget(m_splitPath, 1);
+  splitPickRow->addWidget(splitChoose);
+  sl->addLayout(splitPickRow);
+  auto* splitOptRow = new QHBoxLayout;
+  auto* partLabel = new QLabel("Part size");
+  m_partSize = new QComboBox;
+  m_partSize->addItem("1 MB", qulonglong(1 << 20));
+  m_partSize->addItem("10 MB", qulonglong(10 << 20));
+  m_partSize->addItem("100 MB", qulonglong(100 << 20));
+  m_partSize->addItem("700 MB (CD)", qulonglong(700 << 20));
+  m_partSize->addItem("4 GB (FAT32-safe)", qulonglong((4ull << 30) - 1));
+  m_partSize->setCurrentIndex(2);
+  m_splitBtn = new QPushButton("Split");
+  m_splitBtn->setObjectName("primary");
+  m_splitBtn->setEnabled(false);
+  splitOptRow->addWidget(partLabel);
+  splitOptRow->addWidget(m_partSize);
+  splitOptRow->addStretch(1);
+  splitOptRow->addWidget(m_splitBtn);
+  sl->addLayout(splitOptRow);
+  m_splitResult = new QLabel;
+  m_splitResult->setObjectName("sub");
+  m_splitResult->setWordWrap(true);
+  m_splitResult->hide();
+  sl->addWidget(m_splitResult);
+  root->addWidget(splitBox);
+  connect(splitChoose, &QPushButton::clicked, this, &ToolsView::chooseSplitFile);
+  connect(m_splitBtn, &QPushButton::clicked, this, &ToolsView::split);
 
   // ---- Peek inside an archive --------------------------------------------
   auto* peekBox = new QGroupBox("Peek inside an archive");
@@ -239,6 +284,50 @@ void ToolsView::onListed(const QVariantList& entries) {
     item->setText(0, "(empty archive)");
   }
   emit status(QString("%1 entries · %2 uncompressed").arg(entries.size()).arg(hs(total)), false);
+}
+
+void ToolsView::chooseSplitFile() {
+  QString f = QFileDialog::getOpenFileName(this, "Choose a file to split");
+  if (f.isEmpty()) return;
+  m_splitFile = f;
+  m_splitPath->setText(f);
+  m_splitBtn->setEnabled(true);
+  m_splitResult->hide();
+}
+
+void ToolsView::split() {
+  if (m_splitFile.isEmpty() || m_busy) return;
+  m_busy = true;
+  m_splitBtn->setEnabled(false);
+  m_splitResult->hide();
+  emit status("Splitting " + QFileInfo(m_splitFile).fileName() + "…", false);
+  JobSpec spec;
+  spec.kind = JobSpec::Split;
+  spec.inputs = QStringList{m_splitFile};
+  spec.part_size = m_partSize->currentData().toLongLong();
+  PendingJob job = prepareJob(spec);
+  connect(job.worker, &EngineWorker::finished, this, &ToolsView::onSplit);
+  static_cast<QThread*>(job.thread)->start();
+}
+
+void ToolsView::onSplit(bool ok, const QString& err, const QVariantMap& m) {
+  m_busy = false;
+  m_splitBtn->setEnabled(true);
+  m_splitResult->show();
+  if (!ok) {
+    m_splitResult->setText("Couldn’t split that file: " + err);
+    m_splitResult->setStyleSheet(QString("color:%1;").arg(Palette::bad));
+    emit status(err, true);
+    return;
+  }
+  int n = m.value("volumes").toInt();
+  QString base = m.value("base").toString();
+  m_splitResult->setText(QString("Created %1 volumes:  %2.001 … %2.%3")
+                             .arg(n)
+                             .arg(base)
+                             .arg(n, 3, 10, QChar('0')));
+  m_splitResult->setStyleSheet(QString("color:%1;").arg(Palette::accent));
+  emit status(QString("Split into %1 volumes").arg(n), false);
 }
 
 }  // namespace kolma::ui

@@ -1,5 +1,48 @@
 # Changelog
 
+## 1.2.0
+
+Universal formats, perceptual media shrinking, and split-volume archives with
+in-place extraction — kolma stops being a `.kolma`-only tool and becomes a
+general-purpose file utility.
+
+### Added
+
+- **Universal archive formats (libarchive).** `compress --format zip` (the new
+  default) writes standard `.zip` that Explorer, Finder and `unzip` open
+  directly; `tar`, `tar.gz`, `tar.xz`, `tar.bz2` and `7z` too. `extract` and
+  `list` open `.zip`, `.7z`, `.tar.gz`, `.tar.xz`, `.tar.bz2` and more — not just
+  `.kolma`. The native authenticated `.kolma` container remains for when you
+  want encryption and per-chunk verification.
+- **Perceptual media shrinking.** `kolma shrink <video|image>` re-encodes through
+  an FFmpeg sidecar (`quality` / `balanced` / `smallest` presets) so a huge video
+  gets dramatically smaller and stays directly playable — something archiving
+  alone can never do for already-compressed media. New **Shrink media** desktop
+  view with drag-and-drop and a before/after size card.
+- **Split volumes + in-place extraction.** `kolma split <file> --part-size N`
+  cuts any file into `.001/.002/…` volumes (FAT32 / sharing); `join` reassembles
+  them byte-for-byte. `extract` streams a volume set as one logical file (no
+  joined temporary copy), and `--in-place` reclaims volume space as data is
+  committed (the HatchZip / Bavariya idea) for forward-streaming tar — with a
+  pre-flight free-space check, a `--keep-free` reserve (default 2 GiB) and a
+  safety margin before any volume is deleted. zip/7z keep their index at the end
+  and need backward seeks, so in-place is safely refused for them.
+- **Desktop Tools view.** Inspect any file (type, entropy, compressibility
+  verdict, streaming CRC-32 + SHA-256), peek inside any archive without
+  extracting, and split a file into volumes with friendly part-size presets
+  (1 MB … 4 GB FAT32-safe).
+- **Desktop Compress defaults to ZIP** and hides the engine knobs unless you
+  choose the native format; plain-language result reports replace engine jargon.
+- Smart drag-and-drop routing: a lone video/image opens Shrink, an archive opens
+  Extract, folders/many files open Compress.
+
+### Tests
+
+- 100 C++ tests (adds universal-format round-trips and traversal refusal,
+  streaming SHA-256 against RFC vectors, media shrink, and 7 multipart tests)
+  and 44 Go tests. CI adds zip-interop, media-shrink and split/join/in-place
+  smoke steps, and builds the desktop app on every push.
+
 ## 1.1.0
 
 A desktop app, folder bundles, and Windows support — the same engine, three

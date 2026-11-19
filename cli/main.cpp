@@ -38,7 +38,7 @@
 
 namespace {
 
-const char* kVersion = "1.1.0";
+const char* kVersion = "1.2.0";
 
 std::string json_escape(const std::string& s) {
   std::string out;

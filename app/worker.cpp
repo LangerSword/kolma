@@ -11,6 +11,7 @@
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
 #include "kolma/media.hpp"
+#include "kolma/multipart.hpp"
 #include "kolma/stdarchive.hpp"
 #include "kolma/util.hpp"
 
@@ -131,7 +132,20 @@ void EngineWorker::run() {
       break;
     }
     case JobSpec::Extract: {
-      if (kolma::std_is_standard(archive)) {
+      if (kolma::is_multipart(archive)) {
+        kolma::VolumeSet vs = kolma::detect_volume_set(archive);
+        kolma::MultipartExtractOptions mo;
+        mo.force = m_spec.force;
+        std::string err;
+        bool ok = kolma::extract_multipart(vs, output, mo, err, onProgress);
+        r.ok = ok;
+        r.error = err;
+        if (ok) {
+          r.stats.output_path = output;
+          r.stats.verified = true;
+          r.stats.algorithm_name = "split archive";
+        }
+      } else if (kolma::std_is_standard(archive)) {
         std::string err;
         bool ok = kolma::std_extract(archive, output, m_spec.force, err, onProgress);
         r.ok = ok;
@@ -224,6 +238,16 @@ void EngineWorker::run() {
       mo.force = m_spec.force;
       r = kolma::shrink_media(m_spec.inputs.value(0).toStdString(), mo, onProgress);
       break;
+    }
+    case JobSpec::Split: {
+      const std::string path = m_spec.inputs.value(0).toStdString();
+      std::string err;
+      uint32_t n = kolma::split_file(path, uint64_t(m_spec.part_size), err);
+      QVariantMap m;
+      m["volumes"] = n;
+      m["base"] = qs(path);
+      emit finished(n > 0, qs(err), m);
+      return;
     }
     case JobSpec::Benchmark: {
       r = kolma::benchmark_file(archive, m_spec.level, size_t(m_spec.threads), 8u << 20,

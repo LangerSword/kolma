@@ -11,6 +11,7 @@
 class QLineEdit;
 class QLabel;
 class QPushButton;
+class QComboBox;
 class QProgressBar;
 class QTreeWidget;
 class QGroupBox;
@@ -33,6 +34,9 @@ class ToolsView : public QWidget {
   void onInspected(bool ok, const QString& err, const QVariantMap& m);
   void chooseArchive();
   void onListed(const QVariantList& entries);
+  void chooseSplitFile();
+  void split();
+  void onSplit(bool ok, const QString& err, const QVariantMap& m);
 
   QString m_file;
   QString m_archive;
@@ -45,6 +49,11 @@ class ToolsView : public QWidget {
   QLabel* m_hashes;
   QLabel* m_archName;
   QTreeWidget* m_tree;
+  QString m_splitFile;
+  QLineEdit* m_splitPath;
+  QComboBox* m_partSize;
+  QPushButton* m_splitBtn;
+  QLabel* m_splitResult;
   bool m_busy = false;
 };
 
