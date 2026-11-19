@@ -10,8 +10,19 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <unistd.h>
 #include <vector>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <windows.h>
+#define KOLMA_ISATTY(fd) _isatty(fd)
+#define KOLMA_FILENO(f) _fileno(f)
+#else
+#include <unistd.h>
+#define KOLMA_ISATTY(fd) isatty(fd)
+#define KOLMA_FILENO(f) fileno(f)
+#endif
 
 #include "kolma/algorithm.hpp"
 #include "kolma/analyzer.hpp"
@@ -24,7 +35,7 @@
 
 namespace {
 
-const char* kVersion = "1.0.0";
+const char* kVersion = "1.1.0";
 
 std::string json_escape(const std::string& s) {
   std::string out;
@@ -201,7 +212,7 @@ void emit_progress_json(const kolma::Progress& p) {
 }
 
 void emit_progress_human(const kolma::Progress& p, bool quiet) {
-  if (quiet || !isatty(fileno(stderr))) return;
+  if (quiet || !KOLMA_ISATTY(KOLMA_FILENO(stderr))) return;
   double pct = p.chunks_total > 0 ? 100.0 * double(p.chunks_done) / double(p.chunks_total) : 0.0;
   std::fprintf(stderr, "\r  %5.1f%%  %s  ratio %s   ", pct,
                kolma::human_rate(p.throughput_mbps).c_str(), kolma::format_ratio(p.ratio).c_str());
@@ -209,7 +220,7 @@ void emit_progress_human(const kolma::Progress& p, bool quiet) {
 }
 
 void clear_progress_line(bool quiet) {
-  if (quiet || !isatty(fileno(stderr))) return;
+  if (quiet || !KOLMA_ISATTY(KOLMA_FILENO(stderr))) return;
   std::fprintf(stderr, "\r\033[K");
 }
 
@@ -325,12 +336,21 @@ int finish(const kolma::Result& r, const Options& o, bool human_report) {
 struct TempFile {
   std::string path;
   bool create() {
+#ifdef _WIN32
+    char dir[MAX_PATH + 1];
+    char name[MAX_PATH + 1];
+    if (GetTempPathA(MAX_PATH + 1, dir) == 0) return false;
+    if (GetTempFileNameA(dir, "kol", 0, name) == 0) return false;
+    path = name;  // GetTempFileNameA atomically creates the (empty) file
+    return true;
+#else
     char tmpl[] = "/tmp/kolma-pipe-XXXXXX";
     int fd = ::mkstemp(tmpl);
     if (fd < 0) return false;
     ::close(fd);
     path = tmpl;
     return true;
+#endif
   }
   ~TempFile() {
     if (!path.empty()) std::remove(path.c_str());

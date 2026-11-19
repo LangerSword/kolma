@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(kolma
-        VERSION 1.0.0
+        VERSION 1.1.0
         DESCRIPTION "A pluggable compression engine with an analyser, a parallel chunk engine and a terminal UI"
         LANGUAGES CXX)
 
@@ -73,6 +73,15 @@ if(KOLMA_GUI)
       app/worker.cpp
     )
     set_target_properties(kolma-desktop PROPERTIES AUTOMOC ON)
+    if(APPLE)
+      set_target_properties(kolma-desktop PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "kolma"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "in.langersword.kolma"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+      )
+    endif()
     target_include_directories(kolma-desktop PRIVATE app)
     target_link_libraries(kolma-desktop PRIVATE kolma_core Qt6::Widgets)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

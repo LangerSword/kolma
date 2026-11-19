@@ -82,7 +82,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         "<p>MIT licensed. Built by LangerSword.</p>");
   });
 
-  auto* ver = new QLabel("v1.0.0 · MIT");
+  auto* ver = new QLabel("v1.1.0 · MIT");
   ver->setStyleSheet(QString("color:%1;font-size:11px;").arg(Palette::dim));
   sideLay->addWidget(ver);
 

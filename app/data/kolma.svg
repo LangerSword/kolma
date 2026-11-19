@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="#0B0F14"/>
+  <rect x="8" y="8" width="240" height="240" rx="52" fill="none" stroke="#232D38" stroke-width="4"/>
+  <!-- compression motif: a block squeezed between two mint chevrons -->
+  <rect x="96" y="96" width="64" height="64" rx="12" fill="#7DD3A0"/>
+  <path d="M40 88 L64 128 L40 168" fill="none" stroke="#7DD3A0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M216 88 L192 128 L216 168" fill="none" stroke="#7DD3A0" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="112" y="112" width="32" height="32" rx="6" fill="#0B0F14"/>
+</svg>

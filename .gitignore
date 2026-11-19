@@ -29,3 +29,4 @@ tui/kolma-tui-*
 *.log
 docs/.demo-work/
 tui-gallery/
+tui-features/

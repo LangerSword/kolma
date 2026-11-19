@@ -1,5 +1,10 @@
 name: release
 
+# Security note: every ${{ matrix.* }} interpolation below is a hardcoded
+# constant defined in this file's strategy matrix (linux/darwin/windows, etc.),
+# never attacker-controlled event input. GITHUB_REF_NAME is the pushed tag and
+# is always double-quoted where used.
+
 on:
   push:
     tags: ["v*"]
@@ -8,8 +13,9 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: build ${{ matrix.platform }}-${{ matrix.arch }}
+  # ------------------------------------------------------- CLI + TUI builds --
+  cli:
+    name: cli ${{ matrix.platform }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,6 +35,10 @@ jobs:
             arch: amd64
             cmake-arch: x86_64
             goarch: amd64
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            goos: windows
     steps:
       - uses: actions/checkout@v4
 
@@ -37,37 +47,53 @@ jobs:
           go-version-file: tui/go.mod
           cache-dependency-path: tui/go.sum
 
-      - name: Install build tools (Linux)
+      - name: Install Ninja (Linux)
         if: matrix.platform == 'linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build
 
       - name: Configure
-        run: >
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-          -DKOLMA_WARNINGS_AS_ERRORS=ON
-          ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }}
+        shell: bash
+        run: |
+          gen="Ninja"
+          if [ "${{ matrix.platform }}" = "windows" ]; then gen="Visual Studio 17 2022"; fi
+          cmake -S . -B build -G "$gen" -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=OFF \
+            -DKOLMA_WARNINGS_AS_ERRORS=ON \
+            ${{ matrix.cmake-arch && format('-DCMAKE_OSX_ARCHITECTURES={0}', matrix.cmake-arch) || '' }}
 
-      - name: Build the engine
-        run: cmake --build build
+      - name: Build the engine + CLI
+        run: cmake --build build --config Release
 
       - name: Test the engine
-        # Skipped for the darwin-amd64 cross-build: an x86_64 binary cannot
-        # execute on the arm64 macOS runner. Native builds are always tested.
+        # Skipped for the darwin-amd64 cross-build (x86_64 can't run on arm64).
         if: ${{ !matrix.cmake-arch }}
-        run: ./build/kolma_tests
+        shell: bash
+        run: |
+          if [ "${{ matrix.platform }}" = "windows" ]; then ./build/Release/kolma_tests.exe; else ./build/kolma_tests; fi
 
       - name: Build the TUI
-        run: cd tui && go build -trimpath -ldflags "-s -w" -o kolma-tui .
+        shell: bash
+        run: |
+          cd tui
+          ext=""
+          if [ "${{ matrix.platform }}" = "windows" ]; then ext=".exe"; fi
+          go build -trimpath -ldflags "-s -w" -o "kolma-tui$ext" .
         env:
           GOARCH: ${{ matrix.goarch || '' }}
+          GOOS: ${{ matrix.goos || '' }}
           CGO_ENABLED: "0"
 
       - name: Package
+        shell: bash
         run: |
           set -euo pipefail
           stage=kolma-${{ matrix.platform }}-${{ matrix.arch }}
           mkdir "$stage"
-          cp build/kolma tui/kolma-tui README.md LICENSE "$stage/"
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            cp build/Release/kolma.exe tui/kolma-tui.exe "$stage/"
+          else
+            cp build/kolma tui/kolma-tui "$stage/"
+          fi
+          cp README.md LICENSE "$stage/"
           tar czf "$stage.tar.gz" "$stage"
 
       - uses: actions/upload-artifact@v4
@@ -76,9 +102,89 @@ jobs:
           path: kolma-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
+  # ----------------------------------------------------- desktop GUI builds --
+  gui:
+    name: gui ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+          - os: macos-latest
+            platform: macos
+          - os: windows-latest
+            platform: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          cache: true
+
+      - name: Install build tools (Linux)
+        if: matrix.platform == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libgl1-mesa-dev libxkbcommon-dev libfuse2t64
+
+      - name: Configure
+        shell: bash
+        run: |
+          gen="Ninja"
+          if [ "${{ matrix.platform }}" = "windows" ]; then gen="Visual Studio 17 2022"; fi
+          cmake -S . -B build -G "$gen" -DCMAKE_BUILD_TYPE=Release -DKOLMA_GUI=ON \
+            -DCMAKE_PREFIX_PATH="${QT_ROOT_DIR}"
+
+      - name: Build the desktop app
+        run: cmake --build build --config Release --target kolma-desktop
+
+      - name: Package (Linux AppImage)
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp build/kolma-desktop AppDir/usr/bin/
+          cp app/data/kolma.desktop AppDir/usr/share/applications/
+          cp app/data/kolma.desktop AppDir/kolma.desktop
+          cp app/data/kolma.png AppDir/usr/share/icons/hicolor/256x256/apps/
+          cp app/data/kolma.png AppDir/kolma.png
+          wget -q https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage -O linuxdeployqt
+          chmod +x linuxdeployqt
+          export VERSION="${GITHUB_REF_NAME#v}"
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          ./linuxdeployqt AppDir/usr/share/applications/kolma.desktop -appimage -bundle-non-qt-libs -extra-plugins=imageformats,iconengines
+          mv kolma*.AppImage kolma-desktop-linux-x86_64.AppImage
+
+      - name: Package (macOS DMG)
+        if: matrix.platform == 'macos'
+        shell: bash
+        run: |
+          set -euo pipefail
+          macdeployqt build/kolma-desktop.app -dmg
+          mv build/kolma-desktop.dmg kolma-desktop-macos-arm64.dmg
+
+      - name: Package (Windows zip)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/Release/kolma-desktop.exe dist/
+          windeployqt dist/kolma-desktop.exe --release --no-translations --compiler-runtime
+          Compress-Archive -Path dist/* -DestinationPath kolma-desktop-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kolma-desktop-${{ matrix.platform }}
+          path: kolma-desktop-*
+          if-no-files-found: error
+
+  # ------------------------------------------------------------- publish -----
   release:
     name: publish the release
-    needs: build
+    needs: [cli, gui]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -92,12 +198,12 @@ jobs:
         run: |
           set -euo pipefail
           cd dist
-          sha256sum kolma-*.tar.gz > checksums.txt
+          sha256sum kolma-* > checksums.txt
           cat checksums.txt
 
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/kolma-*.tar.gz dist/checksums.txt \
+          gh release create "$GITHUB_REF_NAME" dist/kolma-* dist/checksums.txt \
             --title "kolma $GITHUB_REF_NAME" --generate-notes

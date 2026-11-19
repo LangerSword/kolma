@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=kolma
+GenericName=Compression Tool
+Comment=Compress, extract and benchmark files with a pluggable engine
+Exec=kolma-desktop %F
+Icon=kolma
+Terminal=false
+Categories=Utility;Archiving;Compression;
+Keywords=compress;archive;extract;zip;compression;
+StartupWMClass=kolma-desktop
+MimeType=application/x-kolma;

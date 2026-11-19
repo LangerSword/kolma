@@ -4,10 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kolma - a compression engine that shows its work</title>
-<meta name="description" content="Seven compression methods behind one interface, an analyser that measures before it commits, authenticated encryption, and a terminal interface. C++20 engine, Go TUI, fuzz-tested, MIT licensed.">
+<meta name="description" content="A compression engine that shows its work: a Qt6 desktop app, a Go terminal UI and a CLI over one auditable C++20 engine. Seven methods, an analyser that measures before it commits, authenticated encryption, folder bundles. Linux, macOS, Windows. Fuzz-tested, MIT licensed.">
 <meta property="og:title" content="kolma - a compression engine that shows its work">
-<meta property="og:description" content="Seven methods, one interface. The analyser measures before it commits, and every claim is backed by a test.">
-<meta property="og:image" content="https://langersword.github.io/kolma/screenshots/inspect.png">
+<meta property="og:description" content="A desktop app, terminal UI and CLI over one auditable C++20 compression engine. Seven methods, authenticated encryption, folder bundles. Linux, macOS, Windows.">
+<meta property="og:image" content="https://langersword.github.io/kolma/screenshots/gui-compress.png">
 <meta property="og:type" content="website">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230B0F14'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='bold' fill='%237DD3A0' text-anchor='middle'%3Ek%3C/text%3E%3C/svg%3E">
@@ -235,10 +235,11 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
   <div class="wrap nav-in">
     <a class="brand" href="#top">kolma</a>
     <div class="nav-links">
+      <a href="#app">App</a>
       <a href="#engine">Engine</a>
       <a href="#benchmarks">Benchmarks</a>
       <a href="#security">Security</a>
-      <a href="#install">Install</a>
+      <a href="#install">Download</a>
       <a class="nav-gh" href="https://github.com/LangerSword/kolma">GitHub</a>
     </div>
   </div>
@@ -249,15 +250,15 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
   <div class="wrap hero-grid">
     <div>
       <h1>Compression that <em>shows its work.</em></h1>
-      <p class="sub">Seven methods, one interface. The analyser measures before it commits, and every claim is backed by a test.</p>
+      <p class="sub">A desktop app, a terminal UI and a CLI over one auditable C++20 engine. Seven methods, an analyser that measures before it commits, authenticated encryption, and folders bundled into a single archive. Linux, macOS and Windows.</p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="#install">Install kolma</a>
+        <a class="btn btn-primary" href="#install">Download the app</a>
         <a class="btn btn-ghost" href="https://github.com/LangerSword/kolma">View on GitHub</a>
       </div>
     </div>
     <figure class="hero-shot">
-      <img src="demo.gif" alt="Screen recording of the kolma terminal interface: browsing files, analysing one, compressing it, and benchmarking all seven methods" width="988" height="658">
-      <figcaption>recorded live: the TUI driving the engine</figcaption>
+      <img src="screenshots/gui-compress.png" alt="The kolma desktop app: a dark compress screen with a drag-and-drop zone, method and level controls, a password toggle and a mint Compress button" width="1060" height="760">
+      <figcaption>the desktop app — drag files or folders in, press Compress</figcaption>
     </figure>
   </div>
 </header>
@@ -265,16 +266,35 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
 <div class="stats">
   <div class="wrap stats-in">
     <div class="stat"><b>7</b><span>compression methods, one contract</span></div>
-    <div class="stat"><b>107</b><span>engine and integration tests</span></div>
+    <div class="stat"><b>126</b><span>engine and integration tests</span></div>
     <div class="stat"><b>416k</b><span>fuzz runs, zero crashes</span></div>
-    <div class="stat"><b>4</b><span>release platforms, checksummed</span></div>
+    <div class="stat"><b>3</b><span>operating systems, checksummed builds</span></div>
   </div>
 </div>
+
+<section id="app">
+  <div class="wrap">
+    <h2>An app anyone can use</h2>
+    <p class="lede">No flags, no jargon. Drag files or a folder onto the window and press Compress; drop a <code>.kolma</code> archive to see its contents and integrity, then Extract. The same auditable engine with a friendly face — native builds for Linux, macOS and Windows.</p>
+    <div class="bento">
+      <div class="cell tall">
+        <h3>Compress</h3>
+        <p>Leave it on Auto and the analyser picks, or choose a method and level. Toggle a password if you want one. Live progress, then a result card with the ratio, space saved and checksum.</p>
+        <a class="img-link" href="screenshots/gui-compress.png" target="_blank" rel="noopener"><img src="screenshots/gui-compress.png" alt="The kolma desktop compress screen with a drag-and-drop zone, method and level controls and a password toggle" width="1060" height="760" loading="lazy"></a>
+      </div>
+      <div class="cell tall">
+        <h3>Extract</h3>
+        <p>Open an archive to inspect its metadata, integrity status and full contents list before you commit. Choose a destination, enter the password if it is encrypted, and Extract. Bundles untar; single files restore under their name.</p>
+        <a class="img-link" href="screenshots/gui-extract.png" target="_blank" rel="noopener"><img src="screenshots/gui-extract.png" alt="The kolma desktop extract screen showing archive metadata, a contents list, destination and password fields" width="1060" height="760" loading="lazy"></a>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section id="engine">
   <div class="wrap">
     <h2>An engine you can audit</h2>
-    <p class="lede">kolma is a C++20 engine with a Go terminal client. The analyser samples your file, trials the methods, and shows the evidence for its choice. Nothing is claimed that the suite does not exercise.</p>
+    <p class="lede">kolma is a C++20 engine with three clients: a Qt6 desktop app, a Go terminal UI and a scriptable CLI. The analyser samples your file, trials the methods, and shows the evidence for its choice. Nothing is claimed that the suite does not exercise.</p>
     <div class="bento">
       <div class="cell tall">
         <h3>The analyser decides with evidence</h3>
@@ -296,6 +316,11 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
         <h3>Parallel by construction</h3>
         <div class="big-num">16 threads</div>
         <p>Chunks compress in parallel and verify on the way out. 1, 4 and 8 threads produce byte-identical archives, and a 40 GiB file never needs more than a bounded working set.</p>
+      </div>
+      <div class="cell">
+        <h3>Folders become one archive</h3>
+        <p>Compress a whole folder or a multi-file selection into a single <code>.kolma</code> bundle — a real ustar tar inside the same authenticated container. List the contents without extracting, and extract refuses any path that could escape the destination.</p>
+        <a class="cell-link" href="screenshots/tui-contents.png">see a bundle's contents</a>
       </div>
       <div class="cell tall">
         <h3>Authenticated encryption</h3>
@@ -364,16 +389,20 @@ footer { border-top: 1px solid var(--line); padding: 36px 0 44px; margin-top: 24
 
 <section id="install">
   <div class="wrap">
-    <h2>Install in one line</h2>
-    <p class="lede">Linux and macOS, amd64 and arm64. The installer verifies the sha256 checksum before it puts anything on your PATH.</p>
+    <h2>Get kolma</h2>
+    <p class="lede">The desktop app for Linux, macOS and Windows, or the CLI + terminal UI in one line. Every release asset is sha256-checksummed.</p>
+    <div class="cta-row" style="margin-bottom:24px">
+      <a class="btn btn-primary" href="https://github.com/LangerSword/kolma/releases/latest">Desktop app · Linux / macOS / Windows</a>
+    </div>
+    <p class="install-alt" style="margin-top:0;margin-bottom:24px">AppImage for Linux (chmod +x, run), DMG for macOS, portable zip for Windows. Drag files in and press Compress.</p>
     <div class="install-card">
       <div class="install-bar">
-        <span>sh</span>
+        <span>sh · CLI + TUI</span>
         <button class="copy-btn" id="copy" type="button">copy</button>
       </div>
       <div class="install-cmd" id="cmd"><span class="p">$ </span>curl -fsSL https://raw.githubusercontent.com/LangerSword/kolma/master/scripts/install.sh | sh</div>
     </div>
-    <p class="install-alt">Prefer source? <code>git clone</code> the repo and run <code>make</code>. You need a C++20 compiler, CMake, Ninja and Go 1.24+. Then <code>kolma compress some-file.bin</code> and let the analyser pick, or open <code>kolma-tui</code> and browse.</p>
+    <p class="install-alt">Prefer source? <code>git clone</code> the repo and run <code>make</code>. You need a C++20 compiler, CMake, Ninja (or Visual Studio) and Go 1.24+; Qt6 Widgets adds the desktop app. Then <code>kolma compress some-folder/</code> and let the analyser pick, or open <code>kolma-tui</code> and browse.</p>
   </div>
 </section>
 </main>

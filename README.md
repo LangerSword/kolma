@@ -1,16 +1,20 @@
 # kolma
 
-**A compression engine that shows its work.** Seven methods behind one
-interface, an analyser that measures before it commits, a parallel chunk
-engine underneath, authenticated encryption, and a terminal interface on top.
+**A compression engine that shows its work — with a desktop app, a terminal
+UI, and a CLI on top.** Seven methods behind one interface, an analyser that
+measures before it commits, a parallel chunk engine underneath, authenticated
+encryption, and folders bundled into a single archive. Runs on Linux, macOS
+and Windows.
 
 [![ci](https://github.com/LangerSword/kolma/actions/workflows/ci.yml/badge.svg)](https://github.com/LangerSword/kolma/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/LangerSword/kolma)](https://github.com/LangerSword/kolma/releases/latest)
 [![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![C++20](https://img.shields.io/badge/engine-C%2B%2B20-informational)
-![Go](https://img.shields.io/badge/interface-Go-00ADD8)
+![Qt6](https://img.shields.io/badge/desktop-Qt6-41CD52)
+![Go](https://img.shields.io/badge/terminal-Go-00ADD8)
+![platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)
 
-![kolma demo](docs/demo.gif)
+![kolma desktop](docs/screenshots/gui-compress.png)
 
 `kolma` is a working implementation of a six-entity design: **User, File,
 Analyzer, Algorithm, Engine, Archive**. Seven compression methods live behind
@@ -19,8 +23,18 @@ the engine splits large files into chunks it compresses in parallel and verifies
 on the way back out. Nothing is claimed that the test suite does not exercise:
 the primitives are checked against published RFC vectors, every method is
 round-tripped over eleven input shapes, the parser and every decoder are fuzzed
-under sanitizers in CI, and the terminal interface is driven through a real
-pseudo-terminal and vision-checked at three terminal sizes.
+under sanitizers in CI, and both interfaces are driven through real terminals
+and vision-checked.
+
+Three ways to use the same engine:
+
+- **Desktop app** (`kolma-desktop`, Qt6) — drag files or folders in, pick a
+  password if you want one, press Compress. Open an archive to see its contents
+  and integrity, then Extract. No flags, no jargon. Linux AppImage, macOS DMG,
+  Windows zip.
+- **Terminal UI** (`kolma-tui`, Go/Charm) — a file manager with multi-select,
+  fuzzy filter, the analyser's evidence, and a benchmark of all seven methods.
+- **CLI** (`kolma`) — scriptable, pipe-friendly, with a stable `--json` contract.
 
 ```
 $ kolma compress /usr/bin/cmake
@@ -88,7 +102,14 @@ results are consumed strictly in order so a 40 GiB file never needs more than
 
 ## Quick start
 
-Install the latest release (Linux/macOS, amd64/arm64; verifies sha256):
+**Desktop app** — grab the build for your OS from the
+[releases page](https://github.com/LangerSword/kolma/releases/latest):
+`kolma-desktop-linux-x86_64.AppImage` (chmod +x, run), `kolma-desktop-macos-arm64.dmg`,
+or `kolma-desktop-windows-x64.zip` (unzip, run `kolma-desktop.exe`). Drag files or
+folders onto the window and press **Compress**; drop a `.kolma` to open and
+**Extract** it.
+
+**CLI + TUI** — install the latest release (Linux/macOS/Windows; verifies sha256):
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/LangerSword/kolma/master/scripts/install.sh | sh
@@ -103,14 +124,18 @@ cd kolma
 make            # builds the C++ engine and the Go interface
 make check      # unit tests, Go integration tests, and a pty-driven TUI test
 
-./build/kolma compress some-file.bin       # auto: the Analyzer picks a method
-./build/kolma decompress some-file.bin.kolma
-./tui/kolma-tui                            # the terminal interface
+./build/kolma compress some-file.bin        # auto: the Analyzer picks a method
+./build/kolma compress my-folder/           # a whole folder -> one bundle
+./build/kolma compress a.txt b.txt c.txt    # several files -> one bundle
+./build/kolma list archive.kolma            # see what's inside
+./build/kolma extract archive.kolma out/    # untar a bundle / restore a file
+./tui/kolma-tui                             # the terminal interface
 ```
 
-Requirements: a C++20 compiler, CMake 3.20+, Ninja (or Make), Go 1.24+ for the
-interface, and Python 3 only for the pty smoke test. Prebuilt binaries for
-Linux and macOS (amd64 + arm64) are on the
+Requirements: a C++20 compiler, CMake 3.20+, Ninja (or Make / Visual Studio),
+Go 1.24+ for the terminal interface, Qt6 Widgets for the desktop app (optional —
+the engine, CLI and tests build without it), and Python 3 only for the pty smoke
+test. Prebuilt binaries for Linux, macOS and Windows are on the
 [releases page](https://github.com/LangerSword/kolma/releases/latest).
 
 It composes with pipes, too:
@@ -121,6 +146,36 @@ kolma decompress data.kolma -o - > restored.bin       # archive -> stdout
 KOLMA_PASSWORD=pw kolma compress - < secret.txt \
   | KOLMA_PASSWORD=pw kolma decompress - > copy.txt   # encrypted, end to end
 ```
+
+## The desktop app
+
+`kolma-desktop` is a Qt6 application that links the engine directly — no
+subprocess, no flags. It is the same dark editorial design as the terminal UI,
+built for people who just want to compress and extract things.
+
+| compress | extract |
+| --- | --- |
+| ![compress](docs/screenshots/gui-compress.png) | ![extract](docs/screenshots/gui-extract.png) |
+
+- **Drag and drop.** Drop files or a folder anywhere on the window to stage them
+  for compression; drop a `.kolma` archive and it opens in Extract instead. The
+  window routes each drop to the right place.
+- **Compress.** Pick a method (or leave it on Auto and let the Analyzer decide),
+  set a level, optionally toggle a password, and press Compress. A live progress
+  bar runs while the engine works off the GUI thread; the result card shows the
+  ratio, space saved, throughput and checksum, with an "Open folder" button.
+- **Extract.** Open an archive to see its metadata, integrity status and full
+  contents list before you commit. Choose a destination, enter the password if
+  it is encrypted, and Extract. Bundles untar; single files restore under their
+  recorded name.
+- **Benchmark.** Race all seven methods on the same input and see ratio and
+  throughput side by side.
+- **Preferences.** Default method, level, thread count and theme live in a small
+  settings dialog and persist between runs.
+
+The engine runs on a worker `QThread`, so the window never freezes, and progress
+and results arrive as queued signals. It builds on Linux, macOS and Windows;
+the release workflow packages an AppImage, a DMG and a portable zip.
 
 ## The terminal interface
 
@@ -145,6 +200,14 @@ binding map that drives the keys.
 | --- | --- |
 | ![benchmark](docs/screenshots/bench.png) | ![archive info](docs/screenshots/info-encrypted.png) |
 
+| multi-select → bundle | bundle contents |
+| --- | --- |
+| ![marks](docs/screenshots/tui-marks.png) | ![contents](docs/screenshots/tui-contents.png) |
+
+| bundle result | extract result |
+| --- | --- |
+| ![bundle](docs/screenshots/tui-bundle.png) | ![extract](docs/screenshots/tui-extract.png) |
+
 Selecting a file runs the analyser for real and shows you what it found, along
 with the evidence: the verdict, the sample trials with their ratios and times,
 and the rationale. Settings sit beside it (stacked on narrow terminals); every
@@ -157,6 +220,7 @@ real terminal captures.
 | `j` / `k`, arrows | move in the browser (mouse wheel and click work too) |
 | `/` | fuzzy-filter the file list; `enter` accepts, `esc` clears |
 | `enter` | open a directory, or select a file and analyse it |
+| `space` | mark/unmark an entry for a bundle (sweeps down as you hold it) |
 | `backspace` | go up a directory |
 | `.` | show or hide dotfiles |
 | `a` / `A` | cycle the algorithm (`auto` lets the Analyzer choose) |
@@ -165,8 +229,9 @@ real terminal captures.
 | `t` / `T` | worker threads |
 | `k` | chunk size |
 | `o` / `w` | edit the output path, set a password |
-| `c` / `d` | compress, decompress (a second press confirms overwriting) |
-| `b` / `i` | benchmark every method, read an archive's header |
+| `c` | compress the selection: a folder or several marked items become one bundle; a lone file opens the analyser |
+| `d` / `x` | extract an archive into a directory (a second press confirms overwriting) |
+| `b` / `i` | benchmark every method; read an archive's header and contents |
 | `↑` / `↓`, wheel | scroll long screens; move the benchmark table selection |
 | `?` | help |
 | `esc` | back one screen |
@@ -180,8 +245,10 @@ command line, so it does not appear in `ps`.
 ## The CLI
 
 ```
-kolma compress   <file> [options]      # also: c, pack; <file> may be - (stdin)
-kolma decompress <archive> [options]   # also: d, unpack, extract
+kolma compress   <file|folder>... [options]  # folders/many files -> one bundle; - is stdin
+kolma decompress <archive> [options]   # raw payload; also: d, unpack
+kolma extract    <archive> [dest-dir]  # untar a bundle / restore a single file
+kolma list       <archive>             # show the contents of an archive
 kolma analyze    <file>                # the Analyzer's verdict and its evidence
 kolma bench      <file>                # every method against the same input
 kolma info       <archive>             # header, sizes, integrity
@@ -256,6 +323,14 @@ Version 1 is the same layout without the `mac` field; it is still readable.
 The tag is `HMAC-SHA256(mac_key, payload || header-without-the-tag)`, so every
 metadata byte is authenticated along with the ciphertext.
 
+**Bundles use the same container.** When you compress a folder or several files,
+the engine first packs them into a ustar tar and compresses that tar as the
+payload, so a bundle gets the identical chunking, checksum and authentication as
+a single file. `list` parses the tar entries back out without extracting, and
+`extract` refuses any entry whose path could escape the destination (`../`,
+absolute paths, backslashes) or that is a symlink/device rather than a regular
+file or directory.
+
 Every chunk is independently decodable, which is what makes parallel
 compression and bounded memory possible. Chunk flag bit 0 marks a chunk stored
 raw, so a single archive can mix a method with passthrough blocks.
@@ -315,8 +390,8 @@ treat it as a starting point; the CMake and Go builds are the tested paths.
 ## Testing
 
 ```sh
-make test        # 75 C++ tests
-make tui-test    # 36 Go tests, driving the real engine binary
+make test        # 82 C++ tests
+make tui-test    # 44 Go tests, driving the real engine binary
 make smoke       # drives the TUI through a pty and asserts on the frames
 make check       # all three
 make fuzz        # libFuzzer under ASan/UBSan (needs clang; FUZZ_TIME=seconds)
@@ -354,6 +429,11 @@ What the C++ suite covers:
   KDF iteration counts are capped, 5000-chunk headers load and round-trip,
   truncated payloads are refused before work starts, and hostile source names
   (separators, control characters, NUL) never become output paths.
+- **Bundles.** A folder and a multi-file set compress into one archive whose
+  payload is a real ustar tar; `list` reads the entries back without extracting,
+  and `extract` restores them byte-identical (verified with a recursive diff).
+  Path traversal entries (`../`, absolute paths) are refused on extract, and an
+  encrypted bundle round-trips through the same HMAC gate as a single file.
 - **Analyzer behaviour.** Magic bytes beat extensions, the veto fires on
   entropy-coded formats and on uniform random data, and recommendations match
   the priority.
@@ -430,19 +510,21 @@ method within 15% of the best ratio if it is faster.
 ## Repository layout
 
 ```
-core/include/kolma/     public headers: util, bitio, file, algorithm, analyzer, archive, engine
+core/include/kolma/     public headers: util, bitio, file, algorithm, analyzer, archive, engine, bundle
 core/src/               the entities; src/algorithms/ holds one file per method
 cli/main.cpp            the command line front end and the JSON contract
-tui/                    the Go interface (main.go, internal/core, internal/ui)
+app/                    the Qt6 desktop app (links kolma_core directly; data/ holds the icon + .desktop)
+tui/                    the Go terminal interface (main.go, internal/core, internal/ui)
 tests/                  the C++ suite, its fixtures, and the libFuzzer harness
 tests/fuzz_corpus/      fuzz seeds: real archives plus every crash ever found
 scripts/tui_smoke.py    pty-driven interface test
 scripts/tui_gallery.py  captures every screen at three sizes as PNGs
+scripts/tui_feature_shots.py  captures the bundle/extract/contents screens
 scripts/tui_demo.py     records docs/demo.gif
 scripts/render_ansi.py  ANSI screen dump -> SVG -> PNG
 scripts/install.sh      checksum-verified release installer
-docs/                   design notes, demo GIF, screenshots
-.github/workflows/      ci.yml (build, tests, sanitizers, fuzz) and release.yml
+docs/                   design notes, demo GIF, screenshots, and the landing page
+.github/workflows/      ci.yml (build, tests, sanitizers, fuzz) and release.yml (CLI/TUI/GUI, 3 OSes)
 flake.nix               reproducible build definition (see the note above)
 ```
 
@@ -459,8 +541,11 @@ flake.nix               reproducible build definition (see the note above)
 - **The benchmark uses each method's preferred block size**, so on small inputs
   wide-block methods are measured single-threaded. That is honest per-method
   speed, not engine throughput; the 11.37 MiB table above is the engine number.
-- **POSIX only.** The engine uses `pread` for lock-free parallel reads, so it
-  targets Linux and macOS rather than Windows.
+- **Cross-platform, with one caveat.** The engine, CLI, TUI and desktop app build
+  on Linux, macOS and Windows. Parallel reads use `pread` on POSIX and `_pread`
+  on Windows; the bundle tar layer is hand-rolled and portable. The desktop
+  AppImage/DMG/zip are produced in CI but, like any from-scratch packaging, are
+  worth a smoke test on your own machine.
 - **Level 9 buys almost nothing over level 6** on the corpus measured here. It is
   kept because the design calls for nine levels and it does help on other inputs,
   but the honest advice is to use level 3 or 6.

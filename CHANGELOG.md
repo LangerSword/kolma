@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.1.0
+
+A desktop app, folder bundles, and Windows support — the same engine, three
+friendly faces, three operating systems.
+
+### Added
+
+- **Desktop app (`kolma-desktop`, Qt6).** Links the engine directly. Drag files
+  or folders in to Compress; drop a `.kolma` to open its metadata, integrity and
+  contents, then Extract. Benchmark all seven methods, and a Preferences dialog
+  that persists. The engine runs on a worker `QThread` so the UI never freezes.
+  Packaged as a Linux AppImage, macOS DMG and Windows zip.
+- **Bundles.** `compress` accepts a folder or several inputs and packs them into
+  one archive (a ustar tar inside the same authenticated container). New `list`
+  and `extract` commands; `extract` untars into a destination directory.
+- **TUI multi-select.** `space` marks entries, `c` compresses the selection
+  (folder/many → bundle, lone file → analyser), `d`/`x` extracts an archive, and
+  the info screen lists a bundle's contents.
+- **Windows.** Engine, CLI, TUI and desktop app build on Windows (MSVC). Parallel
+  reads map to `_pread`; temp files and the tty check are platform-guarded.
+- Cross-platform release pipeline: CLI+TUI for Linux (amd64/arm64), macOS
+  (arm64/amd64) and Windows (x64); GUI for Linux/macOS/Windows.
+
+### Changed
+
+- `compress_bundle` respects a `force` option instead of always overwriting.
+- Archive info's checksum row is labelled `integrity` (was a duplicate `payload`).
+- README and landing page rebuilt around the desktop app and bundles.
+
+### Tests
+
+- 82 C++ tests (bundle round-trip, path-traversal refusal, encrypted bundles,
+  overwrite guard) and 44 Go tests (multi-select, bundle compress, extract,
+  contents, layout guards). GUI vision-verified headlessly.
+
 ## 1.0.0
 
 First stable release. The engine, the archive format and the JSON contract
