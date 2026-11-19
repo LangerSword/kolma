@@ -367,6 +367,42 @@ bool std_list(const std::string& archive, std::vector<StdEntry>& entries, std::s
   return true;
 }
 
+bool std_test(const std::string& archive, uint64_t& entries, std::string& error) {
+  ReadPtr a(archive_read_new());
+  if (!a) {
+    error = "archive_read_new failed";
+    return false;
+  }
+  support_read_formats(a.get());
+  if (archive_read_open_filename(a.get(), archive.c_str(), 65536) != ARCHIVE_OK) {
+    error = archive_error_string(a.get());
+    return false;
+  }
+  entries = 0;
+  archive_entry* entry = nullptr;
+  int r;
+  while ((r = archive_read_next_header(a.get(), &entry)) == ARCHIVE_OK) {
+    ++entries;
+    // Stream every data block: libarchive verifies stored CRCs as it reads, so
+    // a corrupt entry fails here rather than at extract time.
+    const void* buf = nullptr;
+    size_t len = 0;
+    int64_t off = 0;
+    int dr;
+    while ((dr = archive_read_data_block(a.get(), &buf, &len, &off)) == ARCHIVE_OK) {
+    }
+    if (dr != ARCHIVE_EOF) {
+      error = std::string("entry ") + archive_entry_pathname(entry) + ": " + archive_error_string(a.get());
+      return false;
+    }
+  }
+  if (r != ARCHIVE_EOF) {
+    error = archive_error_string(a.get());
+    return false;
+  }
+  return true;
+}
+
 #else  // !KOLMA_HAVE_LIBARCHIVE — graceful stubs so the engine still builds.
 
 bool std_formats_available() { return false; }
@@ -384,6 +420,10 @@ bool std_extract(const std::string&, const std::string&, bool, std::string& erro
   return false;
 }
 bool std_list(const std::string&, std::vector<StdEntry>&, std::string& error) {
+  error = "standard-format support not built (libarchive missing)";
+  return false;
+}
+bool std_test(const std::string&, uint64_t&, std::string& error) {
   error = "standard-format support not built (libarchive missing)";
   return false;
 }

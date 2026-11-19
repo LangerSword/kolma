@@ -208,6 +208,7 @@ void print_usage(std::ostream& os) {
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
      << "  kolma info       <archive> [--no-check] [--json]\n"
+     << "  kolma test       <archive> [--json]   verify integrity without extracting\n"
      << "  kolma algos      [--json]\n"
      << "  kolma version\n\n"
      << "options:\n"
@@ -458,7 +459,8 @@ bool stream_file_to_stdout(const std::string& path) {
 bool is_file_command(const std::string& c) {
   return c == "analyze" || c == "inspect" || c == "info" || c == "bench" || c == "benchmark" ||
          c == "compress" || c == "c" || c == "pack" || c == "decompress" || c == "d" ||
-         c == "unpack" || c == "extract" || c == "shrink" || c == "split" || c == "join";
+         c == "unpack" || c == "extract" || c == "shrink" || c == "split" || c == "join" ||
+         c == "test";
 }
 
 }  // namespace
@@ -862,6 +864,46 @@ int main(int argc, char** argv) {
       std::cout << kolma::format_archive_info(info);
     }
     return info.ok ? 0 : 1;
+  }
+
+  if (command == "test") {
+    // WinRAR-style integrity test: verify without extracting anything.
+    bool ok = false;
+    std::string detail;
+    uint64_t entries = 0;
+    if (kolma::is_multipart(input)) {
+      kolma::VolumeSet vs = kolma::detect_volume_set(input);
+      std::string err;
+      ok = kolma::test_multipart(vs, entries, err);
+      detail = ok ? std::to_string(entries) + " entries verified across " +
+                        std::to_string(vs.paths.size()) + " volumes"
+                  : err;
+    } else if (kolma::std_is_standard(input)) {
+      std::string err;
+      ok = kolma::std_test(input, entries, err);
+      detail = ok ? std::to_string(entries) + " entries verified" : err;
+    } else {
+      kolma::ArchiveInfo info = kolma::read_archive_info(input, true);
+      ok = info.ok && info.header_consistent && info.payload_crc_ok;
+      if (!info.ok) {
+        detail = info.error;
+      } else if (!info.header_consistent) {
+        detail = "header is inconsistent";
+      } else if (!info.payload_crc_ok) {
+        detail = "payload checksum mismatch";
+      } else {
+        detail = "payload checksum verified";
+        if (info.authenticated) detail += " · HMAC authenticated";
+        if (info.bundle) detail += " · bundle";
+      }
+    }
+    if (o.json) {
+      std::cout << "{\"event\":\"done\",\"ok\":" << (ok ? "true" : "false")
+                << ",\"detail\":" << jstr(detail) << "}\n";
+    } else {
+      std::cout << (ok ? "✓ " : "✗ ") << input << ": " << detail << "\n";
+    }
+    return ok ? 0 : 1;
   }
 
   if (command == "bench" || command == "benchmark") {

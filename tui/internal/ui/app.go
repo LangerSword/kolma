@@ -72,6 +72,13 @@ type algosMsg struct {
 	err   error
 }
 
+type testMsg struct {
+	runID  int
+	ok     bool
+	detail string
+	err    error
+}
+
 type errMsg struct{ err error }
 
 // --------------------------------------------------------------------- model
@@ -383,6 +390,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case testMsg:
+		if msg.runID != m.runID {
+			return m, nil
+		}
+		if msg.err != nil {
+			m.setStatus(msg.err.Error(), true)
+		} else if msg.ok {
+			m.setStatus("integrity ok — "+msg.detail, false)
+		} else {
+			m.setStatus("INTEGRITY FAILED — "+msg.detail, true)
+		}
+		return m, nil
+
 	case resultMsg:
 		if msg.runID != m.runID {
 			return m, nil
@@ -528,6 +548,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.compressSelection()
 		case "x":
 			return m.extractSelection()
+		case "v":
+			return m.testSelection()
 		case "esc":
 			if len(m.marked) > 0 {
 				m.marked = map[string]bool{}
@@ -686,6 +708,26 @@ func (m Model) extractSelection() (tea.Model, tea.Cmd) {
 		m.inputs[0].SetValue(filepath.Dir(sel[0].Path))
 	}
 	return m.startRun("extract")
+}
+
+// testSelection runs a WinRAR-style integrity test on the selected archive,
+// reporting pass/fail in the status bar without extracting anything.
+func (m Model) testSelection() (tea.Model, tea.Cmd) {
+	sel := m.selection()
+	if len(sel) != 1 || !sel[0].IsArchive {
+		m.setStatus("select one archive to test", true)
+		return m, nil
+	}
+	m.runID++
+	return m, m.testCmd(sel[0].Path, m.inputs[1].Value(), m.runID)
+}
+
+func (m Model) testCmd(path, password string, runID int) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		tr, err := client.Test(path, password)
+		return testMsg{runID: runID, ok: tr.OK, detail: tr.Detail, err: err}
+	}
 }
 
 func (m *Model) selectTarget(entry core.Entry) {

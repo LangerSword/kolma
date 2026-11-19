@@ -138,10 +138,13 @@ ToolsView::ToolsView(QWidget* parent) : QWidget(parent) {
   pl->setSpacing(10);
   auto* archRow = new QHBoxLayout;
   auto* archChoose = new QPushButton("Choose archive…");
+  m_testBtn = new QPushButton("Test integrity");
+  m_testBtn->setEnabled(false);
   m_archName = new QLabel("See what’s inside a .zip, .7z, .tar.gz or .kolma without extracting it.");
   m_archName->setObjectName("dim");
   m_archName->setWordWrap(true);
   archRow->addWidget(archChoose);
+  archRow->addWidget(m_testBtn);
   archRow->addWidget(m_archName, 1);
   pl->addLayout(archRow);
   m_tree = new QTreeWidget;
@@ -151,9 +154,14 @@ ToolsView::ToolsView(QWidget* parent) : QWidget(parent) {
   m_tree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
   m_tree->setMinimumHeight(120);
   pl->addWidget(m_tree, 1);
+  m_testResult = new QLabel;
+  m_testResult->setWordWrap(true);
+  m_testResult->hide();
+  pl->addWidget(m_testResult);
   root->addWidget(peekBox, 1);
 
   connect(archChoose, &QPushButton::clicked, this, &ToolsView::chooseArchive);
+  connect(m_testBtn, &QPushButton::clicked, this, &ToolsView::testArchive);
 }
 
 void ToolsView::chooseFile() {
@@ -249,6 +257,8 @@ void ToolsView::chooseArchive() {
   m_archive = f;
   m_archName->setText(QFileInfo(f).fileName());
   m_tree->clear();
+  m_testBtn->setEnabled(true);
+  m_testResult->hide();
   emit status("Reading " + QFileInfo(f).fileName() + "…", false);
   JobSpec spec;
   spec.kind = JobSpec::List;
@@ -284,6 +294,37 @@ void ToolsView::onListed(const QVariantList& entries) {
     item->setText(0, "(empty archive)");
   }
   emit status(QString("%1 entries · %2 uncompressed").arg(entries.size()).arg(hs(total)), false);
+}
+
+void ToolsView::testArchive() {
+  if (m_archive.isEmpty() || m_busy) return;
+  m_busy = true;
+  m_testBtn->setEnabled(false);
+  m_testResult->hide();
+  emit status("Testing " + QFileInfo(m_archive).fileName() + "…", false);
+  JobSpec spec;
+  spec.kind = JobSpec::Test;
+  spec.archive = m_archive;
+  PendingJob job = prepareJob(spec);
+  connect(job.worker, &EngineWorker::finished, this, &ToolsView::onTested);
+  static_cast<QThread*>(job.thread)->start();
+}
+
+void ToolsView::onTested(bool ok, const QString& err, const QVariantMap& m) {
+  m_busy = false;
+  m_testBtn->setEnabled(true);
+  m_testResult->show();
+  if (ok) {
+    m_testResult->setText("✓ Integrity OK — " + m.value("detail").toString());
+    m_testResult->setStyleSheet(QString("color:%1;").arg(Palette::accent));
+    emit status("Integrity OK: " + m.value("detail").toString(), false);
+  } else {
+    QString detail = m.value("detail").toString();
+    if (detail.isEmpty()) detail = err;
+    m_testResult->setText("✗ Integrity FAILED — " + detail);
+    m_testResult->setStyleSheet(QString("color:%1;").arg(Palette::bad));
+    emit status("Integrity FAILED: " + detail, true);
+  }
 }
 
 void ToolsView::chooseSplitFile() {

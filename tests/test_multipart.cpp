@@ -160,3 +160,25 @@ KOLMA_TEST(in_place_is_refused_for_indexed_zip) {
   // The volumes must still be intact after the refusal.
   for (const auto& v : vs.paths) CHECK(fs::exists(v));
 }
+
+KOLMA_TEST(test_multipart_verifies_split_tar_without_extracting) {
+  if (!kolma::std_formats_available()) return;
+  const std::string dir = kolma_test::temp_path("mp-test");
+  fs::create_directories(dir + "/src");
+  kolma_test::write_bytes(dir + "/src/a.txt", kolma_test::make_repetitive(3000));
+  kolma_test::write_bytes(dir + "/src/b.txt", kolma_test::make_random(2500, 5));
+  const std::string tar = dir + "/proj.tar";
+  std::string err;
+  kolma::StdPackOptions po;
+  po.format = "tar";
+  CHECK(kolma::std_pack({dir + "/src"}, tar, po, err));
+  uint32_t n = kolma::split_file(tar, 1024, err);
+  CHECK(n >= 2);
+  fs::remove(tar);  // only volumes remain; the test must stream them
+  kolma::VolumeSet vs = kolma::detect_volume_set(tar + ".001");
+  uint64_t entries = 0;
+  CHECK(kolma::test_multipart(vs, entries, err));
+  CHECK(entries >= 3);  // src/, a.txt, b.txt
+  // Testing is non-destructive: every volume survives.
+  for (const auto& v : vs.paths) CHECK(fs::exists(v));
+}

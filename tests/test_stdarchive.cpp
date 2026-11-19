@@ -41,6 +41,41 @@ KOLMA_TEST(std_zip_round_trips_files_and_folders) {
                  kolma_test::read_bytes(dir + "/src/sub/b.bin"));
 }
 
+KOLMA_TEST(std_test_passes_on_a_valid_zip) {
+  if (!kolma::std_formats_available()) return;
+  const std::string dir = kolma_test::temp_path("std-test-ok");
+  fs::create_directories(dir + "/src");
+  kolma_test::write_bytes(dir + "/src/a.txt", kolma_test::make_repetitive(4000));
+  const std::string zip = dir + "/ok.zip";
+  kolma::StdPackOptions opts;
+  opts.force = true;
+  std::string err;
+  CHECK(kolma::std_pack({dir + "/src"}, zip, opts, err));
+  uint64_t n = 0;
+  CHECK(kolma::std_test(zip, n, err));
+  CHECK(n >= 2);
+}
+
+KOLMA_TEST(std_test_detects_a_corrupted_zip) {
+  if (!kolma::std_formats_available()) return;
+  const std::string dir = kolma_test::temp_path("std-test-bad");
+  fs::create_directories(dir);
+  kolma_test::write_bytes(dir + "/f.bin", kolma_test::make_random(4000, 11));
+  const std::string zip = dir + "/bad.zip";
+  kolma::StdPackOptions opts;
+  opts.force = true;
+  std::string err;
+  CHECK(kolma::std_pack({dir + "/f.bin"}, zip, opts, err));
+  // Flip bytes inside the entry data (past the 30-byte local header + "f.bin").
+  auto bytes = kolma_test::read_bytes(zip);
+  CHECK(bytes.size() > 60);
+  for (size_t i = 40; i < 48; ++i) bytes[i] ^= 0xFF;
+  kolma_test::write_bytes(zip, bytes);
+  uint64_t n = 0;
+  CHECK(!kolma::std_test(zip, n, err));
+  CHECK(!err.empty());
+}
+
 KOLMA_TEST(std_tar_gz_round_trips) {
   if (!kolma::std_formats_available()) return;
   const std::string dir = kolma_test::temp_path("std-tgz");

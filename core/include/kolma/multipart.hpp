@@ -60,4 +60,9 @@ bool extract_multipart(const VolumeSet& vs, const std::string& dest_dir,
                        const MultipartExtractOptions& opts, std::string& error,
                        const ProgressFn& on_progress = nullptr);
 
+// Verify a split archive by streaming its volumes as one logical file and
+// reading every entry (libarchive checks CRCs). No joined temp copy, no files
+// written, volumes untouched. The WinRAR-style "test" for split archives.
+bool test_multipart(const VolumeSet& vs, uint64_t& entries, std::string& error);
+
 }  // namespace kolma

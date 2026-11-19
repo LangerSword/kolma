@@ -8,7 +8,7 @@ import "github.com/charmbracelet/bubbles/key"
 type keyMap struct {
 	move, open, upDir, filter, hidden, refresh, mark,
 	algo, level, priority, threads, chunk, output, password,
-	compress, extract, bench, info,
+	compress, extract, bench, info, test,
 	back, scroll, help, quit key.Binding
 }
 
@@ -32,6 +32,7 @@ func newKeyMap() keyMap {
 		extract:    key.NewBinding(key.WithKeys("d", "x"), key.WithHelp("d/x", "extract")),
 		bench:      key.NewBinding(key.WithKeys("b"), key.WithHelp("b", "bench")),
 		info:       key.NewBinding(key.WithKeys("i"), key.WithHelp("i", "info")),
+		test:       key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "test")),
 		back:       key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 		scroll:     key.NewBinding(key.WithKeys("up", "down", "pgup", "pgdown"), key.WithHelp("↑/↓", "scroll")),
 		help:       key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -44,7 +45,7 @@ func newKeyMap() keyMap {
 func (k keyMap) shortFor(s screen, overflow bool) []key.Binding {
 	switch s {
 	case screenBrowse:
-		return []key.Binding{k.move, k.open, k.mark, k.compress, k.extract, k.filter, k.help, k.quit}
+		return []key.Binding{k.move, k.open, k.mark, k.compress, k.extract, k.test, k.filter, k.help, k.quit}
 	case screenInspect:
 		b := []key.Binding{k.compress, k.extract, k.back, k.help, k.bench, k.info, k.output, k.password}
 		if overflow {

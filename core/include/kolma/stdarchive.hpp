@@ -68,4 +68,9 @@ bool std_extract(const std::string& archive, const std::string& dest_dir, bool f
 // List entries without extracting. Returns false + error.
 bool std_list(const std::string& archive, std::vector<StdEntry>& entries, std::string& error);
 
+// Verify integrity by streaming every entry's data (libarchive checks stored
+// CRCs as it reads). Returns false + error on corruption; `entries` counts what
+// was read. The WinRAR-style "test archive" operation — no files are written.
+bool std_test(const std::string& archive, uint64_t& entries, std::string& error);
+
 }  // namespace kolma

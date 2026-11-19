@@ -189,6 +189,41 @@ void EngineWorker::run() {
       emit finished(ok, qs(err), QVariantMap{});
       return;
     }
+    case JobSpec::Test: {
+      bool ok = false;
+      std::string detail;
+      uint64_t entries = 0;
+      if (kolma::is_multipart(archive)) {
+        kolma::VolumeSet vs = kolma::detect_volume_set(archive);
+        std::string err;
+        ok = kolma::test_multipart(vs, entries, err);
+        detail = ok ? std::to_string(entries) + " entries verified across " +
+                          std::to_string(vs.paths.size()) + " volumes"
+                    : err;
+      } else if (kolma::std_is_standard(archive)) {
+        std::string err;
+        ok = kolma::std_test(archive, entries, err);
+        detail = ok ? std::to_string(entries) + " entries verified" : err;
+      } else {
+        kolma::ArchiveInfo info = kolma::read_archive_info(archive, true);
+        ok = info.ok && info.header_consistent && info.payload_crc_ok;
+        if (!info.ok) {
+          detail = info.error;
+        } else if (!info.header_consistent) {
+          detail = "header is inconsistent";
+        } else if (!info.payload_crc_ok) {
+          detail = "payload checksum mismatch";
+        } else {
+          detail = "payload checksum verified";
+          if (info.authenticated) detail += " · HMAC authenticated";
+          if (info.bundle) detail += " · bundle";
+        }
+      }
+      QVariantMap m;
+      m["detail"] = qs(detail);
+      emit finished(ok, ok ? QString() : qs(detail), m);
+      return;
+    }
     case JobSpec::Inspect: {
       const std::string path = m_spec.inputs.value(0).toStdString();
       kolma::FileInfo fi = kolma::inspect_file(path);

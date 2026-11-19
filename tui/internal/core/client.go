@@ -420,6 +420,34 @@ func (c Client) Info(path string) (ArchiveInfo, error) {
 	return envelope.Archive, nil
 }
 
+// TestResult is the outcome of an integrity test.
+type TestResult struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+// Test verifies an archive's integrity without extracting it (WinRAR-style).
+// Works on native, bundle, standard (zip/tar/7z) and split-volume archives.
+func (c Client) Test(archive, password string) (TestResult, error) {
+	cmd := exec.Command(c.Bin, "test", archive, "--json")
+	cmd.Env = os.Environ()
+	if password != "" {
+		cmd.Env = append(cmd.Env, "KOLMA_PASSWORD="+password)
+	}
+	out, err := cmd.Output()
+	// `test` exits non-zero when integrity fails but still prints a JSON result.
+	if len(out) > 0 {
+		var tr TestResult
+		if jerr := json.Unmarshal(out, &tr); jerr == nil {
+			return tr, nil
+		}
+	}
+	if err != nil {
+		return TestResult{}, fmt.Errorf("testing %s: %w", archive, err)
+	}
+	return TestResult{}, fmt.Errorf("testing %s: no result", archive)
+}
+
 func (c Client) Benchmark(path string, level int, limit int64, onProgress func(Progress)) (Result, error) {
 	args := []string{"bench", path}
 	if level > 0 {

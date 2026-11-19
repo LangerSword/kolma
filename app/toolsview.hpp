@@ -34,6 +34,8 @@ class ToolsView : public QWidget {
   void onInspected(bool ok, const QString& err, const QVariantMap& m);
   void chooseArchive();
   void onListed(const QVariantList& entries);
+  void testArchive();
+  void onTested(bool ok, const QString& err, const QVariantMap& m);
   void chooseSplitFile();
   void split();
   void onSplit(bool ok, const QString& err, const QVariantMap& m);
@@ -49,6 +51,8 @@ class ToolsView : public QWidget {
   QLabel* m_hashes;
   QLabel* m_archName;
   QTreeWidget* m_tree;
+  QPushButton* m_testBtn;
+  QLabel* m_testResult;
   QString m_splitFile;
   QLineEdit* m_splitPath;
   QComboBox* m_partSize;

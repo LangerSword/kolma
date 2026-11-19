@@ -13,7 +13,7 @@
 namespace kolma::ui {
 
 struct JobSpec {
-  enum Kind { CompressFile, CompressBundle, CompressStd, Extract, List, Inspect, Benchmark, ShrinkMedia, Split };
+  enum Kind { CompressFile, CompressBundle, CompressStd, Extract, List, Inspect, Benchmark, ShrinkMedia, Split, Test };
   Kind kind = CompressFile;
   QStringList inputs;   // files/folders to compress
   QString archive;      // extract/list source

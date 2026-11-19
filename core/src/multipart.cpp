@@ -360,6 +360,44 @@ void reclaim(ReadCtx& c, bool final) {
 
 }  // namespace
 
+bool test_multipart(const VolumeSet& vs, uint64_t& entries, std::string& error) {
+  if (vs.paths.empty()) {
+    error = "no volumes to test";
+    return false;
+  }
+  if (logical_kind(vs).empty()) {
+    error = "the split archive is not a recognised format";
+    return false;
+  }
+  ReadCtx c;
+  archive* a = open_logical(vs, c, false, error);
+  if (!a) return false;
+  entries = 0;
+  archive_entry* entry = nullptr;
+  int r;
+  while ((r = archive_read_next_header(a, &entry)) == ARCHIVE_OK) {
+    ++entries;
+    const void* buf = nullptr;
+    size_t len = 0;
+    int64_t off = 0;
+    int dr;
+    while ((dr = archive_read_data_block(a, &buf, &len, &off)) == ARCHIVE_OK) {
+    }
+    if (dr != ARCHIVE_EOF) {
+      error = std::string("entry ") + archive_entry_pathname(entry) + ": " + archive_error_string(a);
+      archive_read_free(a);
+      return false;
+    }
+  }
+  if (r != ARCHIVE_EOF) {
+    error = archive_error_string(a);
+    archive_read_free(a);
+    return false;
+  }
+  archive_read_free(a);
+  return true;
+}
+
 bool extract_multipart(const VolumeSet& vs, const std::string& dest_dir,
                        const MultipartExtractOptions& opts, std::string& error,
                        const ProgressFn& on_progress) {
