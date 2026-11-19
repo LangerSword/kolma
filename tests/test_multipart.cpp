@@ -89,10 +89,13 @@ KOLMA_TEST(extract_multipart_zip_streams_without_a_joined_copy) {
   kolma::StdPackOptions po;
   po.format = "zip";
   CHECK(kolma::std_pack({src}, zip, po, err));
-  CHECK_EQ(kolma::split_file(zip, 2048, err), 3u);
+  uint64_t zsize = fs::file_size(zip);
+  uint32_t n = kolma::split_file(zip, 1024, err);
+  CHECK_EQ(n, uint32_t(zsize / 1024 + (zsize % 1024 ? 1 : 0)));
+  CHECK(n >= 2);
   fs::remove(zip);  // only the volumes remain; extraction must stream them
   kolma::VolumeSet vs = kolma::detect_volume_set(zip + ".001");
-  CHECK_EQ(vs.paths.size(), 3u);
+  CHECK_EQ(vs.paths.size(), n);
   const std::string dest = dir + "/out";
   kolma::MultipartExtractOptions mo;
   mo.force = true;
@@ -114,7 +117,10 @@ KOLMA_TEST(extract_multipart_tar_in_place_reclaims_volumes) {
   kolma::StdPackOptions po;
   po.format = "tar";
   CHECK(kolma::std_pack({src}, tar, po, err));
-  CHECK_EQ(kolma::split_file(tar, 2048, err), 4u);
+  uint64_t tsize = fs::file_size(tar);
+  uint32_t n = kolma::split_file(tar, 2048, err);
+  CHECK_EQ(n, uint32_t(tsize / 2048 + (tsize % 2048 ? 1 : 0)));
+  CHECK(n >= 2);
   fs::remove(tar);
   kolma::VolumeSet vs = kolma::detect_volume_set(tar + ".001");
   const std::string dest = dir + "/out";
@@ -135,13 +141,16 @@ KOLMA_TEST(in_place_is_refused_for_indexed_zip) {
   fs::create_directories(dir);
   const std::string src = dir + "/f";
   fs::create_directories(src);
-  kolma_test::write_bytes(src + "/x.txt", kolma_test::make_repetitive(1000));
+  kolma_test::write_bytes(src + "/x.txt", kolma_test::make_random(2000, 11));
   const std::string zip = dir + "/f.zip";
   std::string err;
   kolma::StdPackOptions po;
   po.format = "zip";
   CHECK(kolma::std_pack({src}, zip, po, err));
-  CHECK_EQ(kolma::split_file(zip, 1024, err), 2u);
+  uint64_t zsize = fs::file_size(zip);
+  uint32_t n = kolma::split_file(zip, 512, err);
+  CHECK_EQ(n, uint32_t(zsize / 512 + (zsize % 512 ? 1 : 0)));
+  CHECK(n >= 2);
   kolma::VolumeSet vs = kolma::detect_volume_set(zip + ".001");
   kolma::MultipartExtractOptions mo;
   mo.in_place = true;
