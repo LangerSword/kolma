@@ -57,6 +57,22 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     size_t offset = 0;
     std::string error;
     if (kolma::load_archive_header(kArchivePath, h, offset, error)) {
+      // PBKDF2 is deliberately slow. A crafted header may claim up to
+      // kMaxKdfIterations rounds, which blows libFuzzer's per-input timeout.
+      // Cap the rounds so the KDF/MAC path stays fast. kdf_iterations is a
+      // fixed-width field, so the serialized header size (and payload offset)
+      // is unchanged. The MAC generally won't match after the rewrite; that is
+      // fine here, the fuzzer hunts crashes, not valid authentication tags.
+      if (h.kdf_iterations > 4096) {
+        h.kdf_iterations = 4096;
+        const kolma::Bytes hdr = kolma::serialize_header(h);
+        std::ofstream rw(kArchivePath, std::ios::binary | std::ios::trunc);
+        rw.write(reinterpret_cast<const char*>(hdr.data()), std::streamsize(hdr.size()));
+        if (size > offset) {
+          rw.write(reinterpret_cast<const char*>(data + offset), std::streamsize(size - offset));
+        }
+        rw.close();
+      }
       kolma::read_archive_info(kArchivePath, false);
       kolma::Job job;
       job.mode = kolma::Mode::Decompress;
