@@ -132,6 +132,13 @@ type Result struct {
 	Benchmark []BenchmarkRow
 }
 
+// BundleEntry is one file/folder inside a bundle archive.
+type BundleEntry struct {
+	Path  string `json:"path"`
+	Size  uint64 `json:"size"`
+	IsDir bool   `json:"is_dir"`
+}
+
 // ------------------------------------------------------------------ client --
 
 type Client struct {
@@ -313,6 +320,66 @@ func (c Client) Compress(req RunRequest, onProgress func(Progress)) (Result, err
 
 func (c Client) Decompress(req RunRequest, onProgress func(Progress)) (Result, error) {
 	return c.run(req.args("decompress"), req.Password, onProgress)
+}
+
+// CompressBundle compresses several files/folders into one bundle archive.
+func (c Client) CompressBundle(inputs []string, req RunRequest, onProgress func(Progress)) (Result, error) {
+	args := append([]string{"compress"}, inputs...)
+	if req.Output != "" {
+		args = append(args, "--out", req.Output)
+	}
+	if req.Algorithm != "" {
+		args = append(args, "--algo", req.Algorithm)
+	}
+	if req.Level > 0 {
+		args = append(args, "--level", fmt.Sprint(req.Level))
+	}
+	if req.Priority != "" {
+		args = append(args, "--priority", req.Priority)
+	}
+	if req.Threads > 0 {
+		args = append(args, "--threads", fmt.Sprint(req.Threads))
+	}
+	if req.Force {
+		args = append(args, "--force")
+	}
+	return c.run(args, req.Password, onProgress)
+}
+
+// Extract decompresses an archive and untars a bundle into dest (a single-file
+// archive is restored under its recorded name inside dest).
+func (c Client) Extract(archive, dest, password string, force bool, onProgress func(Progress)) (Result, error) {
+	args := []string{"extract", archive, dest}
+	if force {
+		args = append(args, "--force")
+	}
+	return c.run(args, password, onProgress)
+}
+
+// List returns the contents of an archive without extracting it.
+func (c Client) List(archive, password string) ([]BundleEntry, error) {
+	args := []string{"list", archive, "--json"}
+	cmd := exec.Command(c.Bin, args...)
+	cmd.Env = os.Environ()
+	if password != "" {
+		cmd.Env = append(cmd.Env, "KOLMA_PASSWORD="+password)
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("listing %s: %w", archive, err)
+	}
+	var envelope struct {
+		OK      bool          `json:"ok"`
+		Error   string        `json:"error"`
+		Entries []BundleEntry `json:"entries"`
+	}
+	if err := json.Unmarshal(out, &envelope); err != nil {
+		return nil, err
+	}
+	if !envelope.OK {
+		return nil, errors.New(envelope.Error)
+	}
+	return envelope.Entries, nil
 }
 
 func (c Client) Analyze(path, priority string) (Analysis, error) {

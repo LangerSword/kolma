@@ -16,8 +16,11 @@ import (
 )
 
 // entryItem adapts a directory entry to bubbles/list. FilterValue is what the
-// fuzzy filter matches against.
-type entryItem struct{ entry core.Entry }
+// fuzzy filter matches against. marked tracks multi-select for bundle compress.
+type entryItem struct {
+	entry  core.Entry
+	marked bool
+}
 
 func (i entryItem) FilterValue() string { return i.entry.Name }
 
@@ -46,10 +49,14 @@ func (d entryDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 		kind = "arc "
 	}
 	size := core.HumanSize(uint64(max64(e.entry.Size)))
-	nameW := max(8, inner-2-4-1-10-1)
+	nameW := max(8, inner-19)
 	nameClipped := padRight(clip(name, nameW), nameW)
+	mark := " "
+	if e.marked {
+		mark = "●"
+	}
 	if index == m.Index() {
-		raw := fmt.Sprintf("▸ %s %s %s", kind, nameClipped, padLeft(size, 10))
+		raw := fmt.Sprintf("▸%s %s %s %s", mark, kind, nameClipped, padLeft(size, 10))
 		fmt.Fprint(w, selectedStyle.Render(padRight(raw, inner)))
 		return
 	}
@@ -61,7 +68,11 @@ func (d entryDelegate) Render(w io.Writer, m list.Model, index int, item list.It
 	} else if e.entry.IsArchive {
 		kindStyled = warnStyle.Render(kind)
 	}
-	fmt.Fprintf(w, "  %s %s %s", kindStyled, nameStyled, dimStyle.Render(padLeft(size, 10)))
+	markStyled := dimStyle.Render(mark)
+	if e.marked {
+		markStyled = accentStyle.Render(mark)
+	}
+	fmt.Fprintf(w, " %s %s %s %s", markStyled, kindStyled, nameStyled, dimStyle.Render(padLeft(size, 10)))
 }
 
 // newBrowser builds the bubbles/list browser with the brand palette and a

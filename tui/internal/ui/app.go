@@ -61,6 +61,12 @@ type infoMsg struct {
 	err   error
 }
 
+type contentsMsg struct {
+	runID   int
+	entries []core.BundleEntry
+	err     error
+}
+
 type algosMsg struct {
 	algos []core.AlgoParams
 	err   error
@@ -85,6 +91,10 @@ type Model struct {
 	entries    []core.Entry
 	list       list.Model
 	showHidden bool
+	marked     map[string]bool // multi-select for bundle compress
+	bundleInputs []string      // the set being compressed this run
+	runItems   int             // item count for the current run's subtitle
+	contents   []core.BundleEntry
 
 	target     core.Entry
 	analysis   core.Analysis
@@ -159,6 +169,7 @@ func New(client core.Client, version string) Model {
 		width:      100,
 		height:     30,
 		cwd:        cwd,
+		marked:     map[string]bool{},
 		editing:    -1,
 		level:      0,
 		priority:   1,
@@ -191,7 +202,7 @@ func (m *Model) refresh() {
 	m.entries = entries
 	items := make([]list.Item, len(entries))
 	for i, e := range entries {
-		items[i] = entryItem{entry: e}
+		items[i] = entryItem{entry: e, marked: m.marked[e.Path]}
 	}
 	idx := m.list.Index()
 	m.list.SetItems(items)
@@ -359,7 +370,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.archiveErr = ""
 		m.archive = &msg.info
+		m.contents = nil
 		m.vp.GotoTop()
+		return m, m.contentsCmd(m.target.Path, m.inputs[1].Value())
+
+	case contentsMsg:
+		if msg.runID != m.runID {
+			return m, nil
+		}
+		if msg.err == nil {
+			m.contents = msg.entries
+		}
 		return m, nil
 
 	case resultMsg:
@@ -388,6 +409,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.setStatus(fmt.Sprintf("%s finished: ratio %.4f", msg.kind, msg.res.Stats.Ratio), false)
 			}
+			m.marked = map[string]bool{}
+			m.bundleInputs = nil
 			m.refresh()
 		}
 		m.vp.GotoTop()
@@ -499,6 +522,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.browseOpen()
 		case "backspace", "h", "left":
 			return m.browseUpDir()
+		case " ":
+			return m.toggleMark()
+		case "c":
+			return m.compressSelection()
+		case "x":
+			return m.extractSelection()
+		case "esc":
+			if len(m.marked) > 0 {
+				m.marked = map[string]bool{}
+				m.setStatus("selection cleared", false)
+			}
+			return m, nil
 		case ".":
 			m.showHidden = !m.showHidden
 			m.refresh()
@@ -569,6 +604,88 @@ func (m Model) browseUpDir() (tea.Model, tea.Cmd) {
 		m.list.Select(0)
 	}
 	return m, nil
+}
+
+// toggleMark marks/unmarks the current entry for a bundle compress and steps
+// down, so holding space sweeps a selection like a file manager.
+func (m Model) toggleMark() (tea.Model, tea.Cmd) {
+	item := m.list.SelectedItem()
+	if item == nil {
+		return m, nil
+	}
+	e := item.(entryItem).entry
+	if m.marked[e.Path] {
+		delete(m.marked, e.Path)
+	} else {
+		m.marked[e.Path] = true
+	}
+	idx := m.list.Index()
+	m.list.SetItem(idx, entryItem{entry: e, marked: m.marked[e.Path]})
+	m.list.CursorDown()
+	return m, nil
+}
+
+// selection is the marked set, or the single highlighted entry when nothing is
+// marked.
+func (m Model) selection() []core.Entry {
+	var out []core.Entry
+	if len(m.marked) > 0 {
+		for _, e := range m.entries {
+			if m.marked[e.Path] {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+	if item := m.list.SelectedItem(); item != nil {
+		out = append(out, item.(entryItem).entry)
+	}
+	return out
+}
+
+// compressSelection compresses the selection: a lone regular file goes through
+// the inspect screen (analyzer evidence + settings); a folder or several items
+// become one bundle straight away.
+func (m Model) compressSelection() (tea.Model, tea.Cmd) {
+	sel := m.selection()
+	if len(sel) == 0 {
+		m.setStatus("select something to compress", true)
+		return m, nil
+	}
+	if len(sel) == 1 && !sel[0].IsDir && !sel[0].IsArchive {
+		m.bundleInputs = nil
+		m.selectTarget(sel[0])
+		return m, tea.Batch(m.analyzeCmd(sel[0].Path), m.spinner.Tick)
+	}
+	inputs := make([]string, len(sel))
+	for i, e := range sel {
+		inputs[i] = e.Path
+	}
+	m.bundleInputs = inputs
+	m.target = sel[0]
+	if strings.TrimSpace(m.inputs[0].Value()) == "" {
+		name := sel[0].Name
+		if name == "" {
+			name = "archive"
+		}
+		m.inputs[0].SetValue(filepath.Join(filepath.Dir(sel[0].Path), name+".kolma"))
+	}
+	return m.startRun("compress")
+}
+
+// extractSelection extracts a single selected archive into a destination dir.
+func (m Model) extractSelection() (tea.Model, tea.Cmd) {
+	sel := m.selection()
+	if len(sel) != 1 || !sel[0].IsArchive {
+		m.setStatus("select one .kolma archive to extract", true)
+		return m, nil
+	}
+	m.bundleInputs = nil
+	m.target = sel[0]
+	if strings.TrimSpace(m.inputs[0].Value()) == "" {
+		m.inputs[0].SetValue(filepath.Dir(sel[0].Path))
+	}
+	return m.startRun("extract")
 }
 
 func (m *Model) selectTarget(entry core.Entry) {
@@ -647,9 +764,16 @@ func (m Model) inspectKey(key string) (tea.Model, tea.Cmd) {
 		m.startEditing(1)
 		return m, nil
 	case "c":
+		m.bundleInputs = nil
 		return m.startRun("compress")
 	case "d":
-		return m.startRun("decompress")
+		if !m.target.IsArchive {
+			m.setStatus("select a .kolma archive to extract", true)
+			return m, nil
+		}
+		m.bundleInputs = nil
+		m.inputs[0].SetValue(filepath.Dir(m.target.Path))
+		return m.startRun("extract")
 	case "b":
 		return m.startBench()
 	case "i":
@@ -687,6 +811,7 @@ func (m Model) startRun(kind string) (tea.Model, tea.Cmd) {
 	m.runID++
 	m.running = true
 	m.runKind = kind
+	m.runItems = max(1, len(m.bundleInputs))
 	m.progress = core.Progress{}
 	m.result = core.Result{}
 	m.status = ""
@@ -711,13 +836,36 @@ func (m Model) startRun(kind string) (tea.Model, tea.Cmd) {
 	}
 
 	var work tea.Cmd
-	if kind == "compress" {
-		work = func() tea.Msg {
-			res, err := client.Compress(req, report)
-			close(ch)
-			return resultMsg{runID: runID, kind: "compression", res: res, err: err}
+	switch kind {
+	case "compress":
+		if len(m.bundleInputs) > 0 {
+			inputs := m.bundleInputs
+			work = func() tea.Msg {
+				res, err := client.CompressBundle(inputs, req, report)
+				close(ch)
+				return resultMsg{runID: runID, kind: "compression", res: res, err: err}
+			}
+		} else {
+			work = func() tea.Msg {
+				res, err := client.Compress(req, report)
+				close(ch)
+				return resultMsg{runID: runID, kind: "compression", res: res, err: err}
+			}
 		}
-	} else {
+	case "extract":
+		path := m.target.Path
+		dest := strings.TrimSpace(m.inputs[0].Value())
+		if dest == "" {
+			dest = filepath.Dir(path)
+		}
+		pw := req.Password
+		force := req.Force
+		work = func() tea.Msg {
+			res, err := client.Extract(path, dest, pw, force, report)
+			close(ch)
+			return resultMsg{runID: runID, kind: "extraction", res: res, err: err}
+		}
+	default: // decompress (raw payload)
 		work = func() tea.Msg {
 			res, err := client.Decompress(req, report)
 			close(ch)
@@ -787,6 +935,15 @@ func (m Model) startInfo() (tea.Model, tea.Cmd) {
 	}, m.spinner.Tick)
 }
 
+func (m Model) contentsCmd(path, password string) tea.Cmd {
+	client := m.client
+	runID := m.runID
+	return func() tea.Msg {
+		entries, err := client.List(path, password)
+		return contentsMsg{runID: runID, entries: entries, err: err}
+	}
+}
+
 // ----------------------------------------------------------------------- view
 
 func (m Model) View() string {
@@ -841,6 +998,9 @@ func (m Model) screenName() string {
 
 func (m Model) breadcrumb() string {
 	if m.screen == screenBrowse {
+		if n := len(m.marked); n > 0 {
+			return fmt.Sprintf("%s  ·  %d selected", m.cwd, n)
+		}
 		return m.cwd
 	}
 	return m.target.Path
@@ -1061,7 +1221,11 @@ func (m Model) viewRun() string {
 	if title == "" {
 		title = "run"
 	}
-	return panelFill(title, sanitize(m.target.Name), strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), m.running)
+	subtitle := sanitize(m.target.Name)
+	if m.runItems > 1 {
+		subtitle = fmt.Sprintf("%d items → one archive", m.runItems)
+	}
+	return panelFill(title, subtitle, strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), m.running)
 }
 
 func encryptionText(encrypted, authenticated bool) string {
@@ -1123,8 +1287,15 @@ func (m Model) viewInfo() string {
 	if !a.PayloadCRCOK {
 		payloadState = errBadge.Render("✗ CHECKSUM MISMATCH")
 	}
-	b.WriteString(row("payload", payloadState+" "+dimStyle.Render("("+core.HumanSize(a.PayloadRead)+" read back)"), "", inner))
-	return panelFill("archive", sanitize(m.target.Name), b.String(), width, m.contentHeight(), false)
+	b.WriteString(row("integrity", payloadState+" "+dimStyle.Render("("+core.HumanSize(a.PayloadRead)+" read back)"), "", inner) + "\n")
+	if len(m.contents) > 0 {
+		b.WriteString("\n  " + accentStyle.Render(fmt.Sprintf("contents (%d)", len(m.contents))) + "\n")
+		for _, e := range m.contents {
+			line := fmt.Sprintf("  %10s  %s", core.HumanSize(e.Size), sanitize(e.Path))
+			b.WriteString(clip(line, inner) + "\n")
+		}
+	}
+	return panelFill("archive", sanitize(m.target.Name), strings.TrimSuffix(b.String(), "\n"), width, m.contentHeight(), false)
 }
 
 // --------------------------------------------------------------------- bench

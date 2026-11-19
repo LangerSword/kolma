@@ -629,6 +629,136 @@ func TestEmptyDirectoryShowsAHint(t *testing.T) {
 	}
 }
 
+// ------------------------------------------------------- bundles / extract --
+
+func TestSpaceMarksAndSelectionGathers(t *testing.T) {
+	m, _ := newTestModel(t)
+	// Mark the first two entries (subdir, a.txt); space steps down each time.
+	m = send(t, m, " ", " ")
+	if len(m.marked) != 2 {
+		t.Fatalf("expected 2 marked entries, got %d", len(m.marked))
+	}
+	sel := m.selection()
+	if len(sel) != 2 {
+		t.Fatalf("selection should gather the 2 marked entries, got %d", len(sel))
+	}
+	if !strings.Contains(m.breadcrumb(), "2 selected") {
+		t.Fatalf("the header should show the selection count, got %q", m.breadcrumb())
+	}
+	if !strings.Contains(m.View(), "●") {
+		t.Fatalf("marked rows should render a mark indicator:\n%s", m.View())
+	}
+	// esc clears the selection.
+	m = send(t, m, "esc")
+	if len(m.marked) != 0 {
+		t.Fatalf("esc should clear the selection, got %d", len(m.marked))
+	}
+}
+
+func TestCompressingAFolderBundlesIt(t *testing.T) {
+	m, dir := newTestModel(t)
+	// The first entry is the subdirectory; c on it bundles straight away.
+	m = send(t, m, "c")
+	if m.screen != screenRun {
+		t.Fatalf("compressing a folder should go to the run screen, got %v", m.screen)
+	}
+	if len(m.bundleInputs) != 1 || m.bundleInputs[0] != filepath.Join(dir, "subdir") {
+		t.Fatalf("bundleInputs should hold the folder, got %v", m.bundleInputs)
+	}
+	if m.runKind != "compress" {
+		t.Fatalf("runKind is %q, want compress", m.runKind)
+	}
+	if !strings.HasSuffix(m.inputs[0].Value(), "subdir.kolma") {
+		t.Fatalf("bundle output should be named after the folder, got %q", m.inputs[0].Value())
+	}
+}
+
+func TestCompressingSeveralMarkedItemsBundlesThem(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = send(t, m, " ", " ") // mark subdir + a.txt
+	m = send(t, m, "c")
+	if len(m.bundleInputs) != 2 {
+		t.Fatalf("expected a 2-item bundle, got %v", m.bundleInputs)
+	}
+	if m.screen != screenRun {
+		t.Fatalf("expected the run screen, got %v", m.screen)
+	}
+}
+
+func TestCompressingALoneFileOpensInspect(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = send(t, m, "down", "c") // a.txt
+	if m.screen != screenInspect {
+		t.Fatalf("a lone file should open inspect (analyzer evidence), got %v", m.screen)
+	}
+	if len(m.bundleInputs) != 0 {
+		t.Fatalf("a lone file must not be treated as a bundle, got %v", m.bundleInputs)
+	}
+}
+
+func TestBundleSubtitleSurvivesResult(t *testing.T) {
+	// Regression: the success handler clears bundleInputs, which used to wipe
+	// the "N items -> one archive" subtitle before the result view rendered.
+	m, _ := newTestModel(t)
+	m = send(t, m, " ", " ") // mark subdir + a.txt
+	m = send(t, m, "c")      // start the bundle run
+	if m.runItems != 2 {
+		t.Fatalf("runItems should be 2, got %d", m.runItems)
+	}
+	next, _ := m.Update(resultMsg{runID: m.runID, kind: "compression", res: core.Result{
+		OK: true, Stats: core.Stats{Algorithm: "lz77", Ratio: 0.4, OrigSize: 100, CompSize: 40},
+	}})
+	m = next.(Model)
+	if len(m.bundleInputs) != 0 {
+		t.Fatal("the selection should be cleared after a successful run")
+	}
+	if !strings.Contains(m.View(), "2 items → one archive") {
+		t.Fatalf("the bundle subtitle should survive the result:\n%s", m.View())
+	}
+}
+
+func TestExtractingAnArchiveTargetsItsDirectory(t *testing.T) {
+	m, dir := newTestModel(t)
+	m = send(t, m, "G", "x") // b.kolma is last
+	if m.runKind != "extract" {
+		t.Fatalf("runKind is %q, want extract", m.runKind)
+	}
+	if m.screen != screenRun {
+		t.Fatalf("expected the run screen, got %v", m.screen)
+	}
+	if m.inputs[0].Value() != dir {
+		t.Fatalf("extract destination should default to the archive's dir %q, got %q", dir, m.inputs[0].Value())
+	}
+}
+
+func TestExtractRefusesNonArchives(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = send(t, m, "down", "x") // a.txt is not an archive
+	if m.running {
+		t.Fatal("extract should not start on a non-archive")
+	}
+	if !strings.Contains(m.status, "archive") {
+		t.Fatalf("expected a hint about selecting an archive, got %q", m.status)
+	}
+}
+
+func TestInfoShowsBundleContents(t *testing.T) {
+	m, _ := newTestModel(t)
+	m.archive = &core.ArchiveInfo{Version: 2, Source: "proj", Algorithm: "lz77", OrigSize: 100,
+		CompSize: 40, ChunkCount: 1, ChunkSize: 100, OrigCRC: "deadbeef", HeaderConsistent: true,
+		PayloadCRCOK: true, PayloadRead: 40}
+	m.contents = []core.BundleEntry{
+		{Path: "proj/", IsDir: true},
+		{Path: "proj/a.txt", Size: 60},
+		{Path: "proj/sub/b.txt", Size: 40},
+	}
+	m.screen = screenInfo
+	view := m.View()
+	if !strings.Contains(view, "contents (3)") || !strings.Contains(view, "proj/a.txt") {
+		t.Fatalf("the info screen should list the bundle contents:\n%s", view)
+	}
+}
+
 // TestEveryScreenFitsTheTerminal is the permanent "not broken" guard: at every
 // supported size, no rendered line may be wider than the terminal and no frame
 // may be taller than it. Overflow is what makes a TUI feel broken.
