@@ -1,7 +1,11 @@
 // Shared fixtures for the test suite: temp files and realistic input shapes.
 #pragma once
 
+#ifdef _WIN32
+#include <process.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <cstdint>
 #include <filesystem>
@@ -12,11 +16,19 @@
 
 namespace kolma_test {
 
+inline int test_pid() {
+#ifdef _WIN32
+  return ::_getpid();
+#else
+  return ::getpid();
+#endif
+}
+
 inline std::string temp_dir() {
   static std::string base;
   if (base.empty()) {
     base = (std::filesystem::temp_directory_path() /
-            ("kolma-tests-" + std::to_string(::getpid())))
+            ("kolma-tests-" + std::to_string(test_pid())))
                .string();
     std::filesystem::create_directories(base);
   }

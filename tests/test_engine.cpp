@@ -373,7 +373,11 @@ KOLMA_TEST(decompress_refuses_a_dangling_symlink_output) {
   const std::string link = dir + "/symlink-link.out";
   const std::string target = dir + "/symlink-target.out";
   std::filesystem::remove(link);
-  std::filesystem::create_symlink(target, link);
+  std::error_code link_ec;
+  std::filesystem::create_symlink(target, link, link_ec);
+  // Windows needs a privilege to create symlinks; where it is unavailable the
+  // fixture cannot be set up, so skip rather than fail.
+  if (link_ec) return;
   Job back;
   back.mode = Mode::Decompress;
   back.input = arc;
