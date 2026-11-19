@@ -16,8 +16,11 @@
 #include "kolma/algorithm.hpp"
 #include "kolma/analyzer.hpp"
 #include "kolma/archive.hpp"
+#include "kolma/bundle.hpp"
 #include "kolma/engine.hpp"
 #include "kolma/file.hpp"
+
+#include <filesystem>
 
 namespace {
 
@@ -164,8 +167,10 @@ Options parse_options(int argc, char** argv, int start) {
 void print_usage(std::ostream& os) {
   os << "kolma " << kVersion << " -- a pluggable compression engine\n\n"
      << "usage:\n"
-     << "  kolma compress   <file> [options]      # <file> may be - for stdin\n"
+     << "  kolma compress   <file|folder>... [options]  # folders/many files -> one bundle\n"
      << "  kolma decompress <archive> [options]   # -o - writes the payload to stdout\n"
+     << "  kolma extract    <archive> [dest-dir]  # untar a bundle / restore a single file\n"
+     << "  kolma list       <archive>             # show the contents of an archive\n"
      << "  kolma analyze    <file> [--priority P] [--json]\n"
      << "  kolma bench      <file> [--level N] [--limit SIZE] [--json]\n"
      << "  kolma info       <archive> [--no-check] [--json]\n"
@@ -476,6 +481,76 @@ int main(int argc, char** argv) {
   if (!kolma::priority_from_name(o.priority, priority)) {
     std::cerr << "kolma: unknown priority '" << o.priority << "' (maxratio | balanced | maxspeed)\n";
     return 2;
+  }
+
+  // list: show what is inside an archive (a bundle or a single file).
+  if (command == "list" || command == "ls") {
+    std::vector<kolma::BundleEntry> entries;
+    std::string err;
+    if (!kolma::list_bundle(input, o.password, entries, err)) {
+      std::cerr << "kolma: " << err << "\n";
+      return 1;
+    }
+    if (o.json) {
+      std::cout << "{\"event\":\"done\",\"ok\":true,\"entries\":[";
+      for (size_t i = 0; i < entries.size(); ++i) {
+        if (i) std::cout << ",";
+        std::cout << "{\"path\":" << jstr(entries[i].path) << ",\"size\":" << entries[i].size
+                  << ",\"is_dir\":" << (entries[i].is_dir ? "true" : "false") << "}";
+      }
+      std::cout << "]}\n";
+    } else {
+      uint64_t total = 0;
+      for (const auto& e : entries) {
+        std::printf("%12s  %s\n", kolma::human_size(e.size).c_str(), e.path.c_str());
+        total += e.size;
+      }
+      std::printf("\n%zu entries, %s uncompressed\n", entries.size(),
+                  kolma::human_size(total).c_str());
+    }
+    return 0;
+  }
+
+  // extract: decompress and, for a bundle, untar into a destination directory.
+  if (command == "extract") {
+    std::string dest = o.positionals.size() > 1
+                           ? o.positionals[1]
+                           : std::filesystem::path(input).parent_path().string();
+    if (dest.empty()) dest = ".";
+    kolma::Result r = kolma::extract_archive(input, dest, o.password, o.force, progress);
+    return finish(r, o, true);
+  }
+
+  // compress: a whole folder or several inputs become one bundle archive.
+  if (command == "compress" || command == "c" || command == "pack") {
+    bool bundle = o.positionals.size() > 1;
+    if (!bundle && input != "-") {
+      std::error_code ec;
+      bundle = std::filesystem::is_directory(input, ec);
+    }
+    if (bundle) {
+      std::string out = o.output;
+      if (out.empty()) {
+        std::filesystem::path first(o.positionals.front());
+        std::string name = first.filename().string();
+        if (name.empty()) name = "archive";
+        std::filesystem::path parent = first.parent_path();
+        out = (parent.empty() ? std::filesystem::path(name + ".kolma")
+                              : parent / (name + ".kolma"))
+                  .string();
+      }
+      kolma::BundleOptions opts;
+      opts.algorithm = o.algorithm;
+      opts.level = o.level;
+      opts.priority = priority;
+      opts.password = o.password;
+      opts.threads = size_t(std::max(0ll, o.threads));
+      opts.chunk_size = size_t(std::max(0ll, o.chunk_size));
+      opts.memory_limit = size_t(std::max(0ll, o.memory_limit));
+      opts.force = o.force;
+      kolma::Result r = kolma::compress_bundle(o.positionals, out, opts, progress);
+      return finish(r, o, true);
+    }
   }
 
   if (command == "analyze" || command == "inspect") {

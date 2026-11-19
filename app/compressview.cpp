@@ -259,6 +259,7 @@ void CompressView::start() {
   spec.priority = m_priority->currentIndex();
   spec.level = m_level->value();
   spec.password = m_encrypt->isChecked() ? m_password->text() : QString();
+  spec.force = true;  // the destination is explicit; re-compressing replaces it
 
   m_result->hide();
   m_bar->setValue(0);

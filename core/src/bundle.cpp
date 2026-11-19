@@ -551,7 +551,7 @@ Result compress_bundle(const std::vector<std::string>& inputs, const std::string
   job.chunk_size = opts.chunk_size;
   job.memory_limit = opts.memory_limit;
   job.bundle = true;
-  job.force = true;  // the temp tar is ours; the output overwrite rule is the caller's
+  job.force = opts.force;  // respect the caller's overwrite choice for the output
   return run_job(job, on_progress);
 }
 

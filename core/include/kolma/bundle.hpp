@@ -37,6 +37,7 @@ struct BundleOptions {
   size_t threads = 0;
   size_t chunk_size = 0;
   size_t memory_limit = 256u << 20;
+  bool force = false;  // overwrite an existing output archive
 };
 
 // Compress files/folders into one .kolma bundle. Each input is stored under its
