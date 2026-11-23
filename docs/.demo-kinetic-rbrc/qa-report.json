@@ -1,0 +1,104 @@
+{
+  "stage": "final",
+  "probe": {
+    "programs": [],
+    "stream_groups": [],
+    "streams": [
+      {
+        "index": 0,
+        "codec_name": "h264",
+        "codec_type": "video",
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "30/1",
+        "avg_frame_rate": "30/1"
+      },
+      {
+        "index": 1,
+        "codec_name": "aac",
+        "codec_type": "audio",
+        "sample_rate": "96000",
+        "channels": 2,
+        "r_frame_rate": "0/0",
+        "avg_frame_rate": "0/0"
+      }
+    ],
+    "format": {
+      "duration": "30.000000",
+      "size": "4939937",
+      "bit_rate": "1317316"
+    }
+  },
+  "decode_errors": [],
+  "loudness": {
+    "input_i": "-16.49",
+    "input_tp": "-2.42",
+    "input_lra": "3.20",
+    "input_thresh": "-26.60",
+    "output_i": "-16.06",
+    "output_tp": "-2.19",
+    "output_lra": "2.70",
+    "output_thresh": "-26.11",
+    "normalization_type": "dynamic",
+    "target_offset": "0.06"
+  },
+  "first_frame_luma_mean": 12.67,
+  "first_frame_luma_max": 185,
+  "stills": [
+    {
+      "t": 1,
+      "beat": 1,
+      "missing": [],
+      "text": "compression is a black box.  || compression is a black box. "
+    },
+    {
+      "t": 5,
+      "beat": 2,
+      "missing": [],
+      "text": "82 / 07 eight methods. no evidence. 01 store 02 prle 03 huffman 04 1277 05 lzw 9 bwt-mtf-ari 07 delta-rle 08 rbrc  || 62 / 87 \u00b0 eight methods. \u00b0 no evidence. o1 store 02 prle 03 huffman 84 1277 05 lzw 9 bwt-mtf-ari o7 delta-rle "
+    },
+    {
+      "t": 9,
+      "beat": 3,
+      "missing": [],
+      "text": "63 / 07 kolma measures first. analyser / benchmark ks \" ach \u00a2 w/ f o (\u2014 benchmark o ghi t algor n tio output throughput 1277 0.0151 currency) bwt-mtf-ari 0178 b 29 mb/s nd memory limit) law [ 0880 1.55 kib 64.97 mb/s huffman [ 5727 i8 fastest ed 154.10 mb/s store 0000 .. 17.58 kib 121.58 mb/s rle 0000 17.58 kib 106.17 mb/s delta-rle 0000 17.58 kib 150.36 mb/s t < o . - p 32 kib window, lazy matching above level 4; th"
+    },
+    {
+      "t": 13,
+      "beat": 4,
+      "missing": [],
+      "text": "04 / 07 evidence, not vibes. original 11.37 mib compressed 6.11 mib 0.5376 throughput 39.30 mb/s ratio 0.5376 iez 7= ifeveie =6 chunks 6 x 2.00 mib crc32 16bc7172 $ kolma compress /usr/bin/cmake  || 84 / 87 o \u00b0 evidence, not vibes. original 11.37 mib py compressed 6.11 mib throughput 39.30 mb/s ratio 0.5376 - lz77 level 6 chunks 6 x 2.00 mib crc32 16bc7172 $ kolma compress /usr/bin/cmake "
+    },
+    {
+      "t": 18,
+      "beat": 5,
+      "missing": [],
+      "text": "65 / 07 nlew: rbrc. run-boundary rank coder transition mask + block-static frequency-ranked alphabet 0.2590 57.1 mb/s rbrc 0.2590 lzw 0.2880 rle 0.3577 huffman 0.7510  || 85 / 07 new: rbrc [ ] [ ] run-boundary rank coder transition mask + block-static frequency-ranked alphabet \u00b0 57.1 mb/s rbrc \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014 () , 2590 lzw e e e ] 0.2880 rle e \u2014 0.3577 huffman \u2014_\u2014\u2014 0.7510 "
+    },
+    {
+      "t": 23,
+      "beat": 6,
+      "missing": [],
+      "text": "06 / 07 one engine. three surfaces. terminal desktop command line a heen na-f4 . 17.58 k18 [ setings - auto (the analyzer decid compress text (text) avto (fron the priority) $ kolma compress <file> 4.3967 bits/byte or batanced drop files or a whle folder. by default you get a 2ip anyone can open \u2014 switch to kolma's own fo a e or a password 98.5% 7 v - auto (fron level and mem auto (hardware concurren aut analyser cho"
+    },
+    {
+      "t": 28,
+      "beat": 7,
+      "missing": [],
+      "text": "87 / 07 kolma. langersword.github.io/kolma g0 meperesses = /e s enesipee (cil=/ = va r te y,  || 87 /[ 87 langersword.github.io/kolma comepress /- tnspeegt /- verteey "
+    }
+  ],
+  "gif": {
+    "size": [
+      720,
+      406
+    ],
+    "frames": 240,
+    "bytes": 4794233
+  },
+  "files": {
+    "mp4_bytes": 4939937,
+    "gif_bytes": 4794233
+  },
+  "pass": true
+}

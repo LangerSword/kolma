@@ -39,9 +39,9 @@ Types list, a Typical Ratio, a Typical Speed, Memory Usage, a Block Size, and a
 Dictionary Size.
 
 *In the code:* the abstract `kolma::Algorithm` and its `AlgoParams`
-(`core/include/kolma/algorithm.hpp`), with seven implementations in
-`core/src/algorithms/`. The registry order is frozen because the index is what
-goes into the archive header.
+(`core/include/kolma/algorithm.hpp`), with eight implementations in
+`core/src/algorithms/`, including `rbrc` at registry index 7. The registry order
+is frozen because the index is what goes into the archive header.
 
 **Engine.** The core worker that runs an algorithm on a file. It has a Thread
 Count, a Buffer Size, a Chunk Size for streaming large files, a Memory Limit, and

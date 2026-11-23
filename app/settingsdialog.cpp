@@ -33,7 +33,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent) {
   form->addRow("Default priority", m_priority);
 
   m_algo = new QComboBox;
-  m_algo->addItems({"auto", "lz77", "bwt-mtf-ari", "lzw", "huffman", "delta-rle", "rle", "store"});
+  m_algo->addItems({"auto", "lz77", "bwt-mtf-ari", "lzw", "huffman", "delta-rle", "rbrc", "rle", "store"});
   m_algo->setCurrentText(prefAlgo());
   form->addRow("Default method", m_algo);
 

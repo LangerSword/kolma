@@ -64,8 +64,8 @@ func TestVersionAndAlgorithms(t *testing.T) {
 	if err != nil {
 		t.Fatalf("algorithms: %v", err)
 	}
-	if len(algos) != 7 {
-		t.Fatalf("expected 7 algorithms, got %d", len(algos))
+	if len(algos) != 8 {
+		t.Fatalf("expected 8 algorithms, got %d", len(algos))
 	}
 	seen := map[string]bool{}
 	for _, a := range algos {
@@ -74,7 +74,7 @@ func TestVersionAndAlgorithms(t *testing.T) {
 		}
 		seen[a.ID] = true
 	}
-	for _, want := range []string{"store", "rle", "huffman", "lz77", "lzw", "bwt-mtf-ari", "delta-rle"} {
+	for _, want := range []string{"store", "rle", "huffman", "lz77", "lzw", "bwt-mtf-ari", "delta-rle", "rbrc"} {
 		if !seen[want] {
 			t.Errorf("algorithm %q missing from the registry", want)
 		}
@@ -326,8 +326,8 @@ func TestBenchmarkCoversEveryAlgorithm(t *testing.T) {
 	if !res.OK {
 		t.Fatalf("benchmark failed: %s", res.Error)
 	}
-	if len(res.Benchmark) != 7 {
-		t.Fatalf("expected 7 benchmark rows, got %d", len(res.Benchmark))
+	if len(res.Benchmark) != 8 {
+		t.Fatalf("expected 8 benchmark rows, got %d", len(res.Benchmark))
 	}
 	for i := 1; i < len(res.Benchmark); i++ {
 		if res.Benchmark[i].Ratio < res.Benchmark[i-1].Ratio {

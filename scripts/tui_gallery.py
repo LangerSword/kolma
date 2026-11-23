@@ -141,7 +141,7 @@ def main() -> int:
             send("i", 1.4)                      # archive info screen
             shot("13-info")
             special("Escape", 0.3)
-            send("b", 3.5)                      # benchmark all seven methods
+            send("b", 3.5)                      # benchmark all eight methods
             shot("14-bench")
             send("Down", 0.4)                   # move the table selection
             shot("15-bench-selected")

@@ -16,12 +16,12 @@ double elapsed_ms_since(const std::chrono::steady_clock::time_point& start) {
 std::vector<std::string> candidates_for(Priority priority) {
   switch (priority) {
     case Priority::MaxSpeed:
-      return {"rle", "huffman", "lz77"};
+      return {"rle", "huffman", "lz77", "rbrc"};
     case Priority::MaxRatio:
-      return {"lz77", "lzw", "bwt-mtf-ari", "delta-rle", "huffman"};
+      return {"lz77", "lzw", "bwt-mtf-ari", "delta-rle", "huffman", "rbrc"};
     case Priority::Balanced:
     default:
-      return {"lz77", "lzw", "huffman", "delta-rle"};
+      return {"lz77", "lzw", "huffman", "delta-rle", "rbrc"};
   }
 }
 

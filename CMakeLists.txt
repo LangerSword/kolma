@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(kolma
-        VERSION 1.2.0
+        VERSION 1.3.0
         DESCRIPTION "A pluggable compression engine with an analyser, a parallel chunk engine and a terminal UI"
         LANGUAGES CXX)
 
@@ -53,6 +53,7 @@ add_library(kolma_core STATIC
   core/src/algorithms/lzw.cpp
   core/src/algorithms/bwt_mtf_ari.cpp
   core/src/algorithms/delta_rle.cpp
+  core/src/algorithms/rbrc.cpp
 )
 target_include_directories(kolma_core PUBLIC core/include)
 target_link_libraries(kolma_core PUBLIC kolma_flags Threads::Threads)

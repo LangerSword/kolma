@@ -102,7 +102,7 @@ def main() -> int:
         rec.key("Enter", 0.4)               # sensor.bin
         rec.hold(1.5)
         rec.key("b", 0.4)                   # benchmark
-        rec.hold(3.5)                       # seven methods race
+        rec.hold(3.5)                       # eight methods race
         rec.key("Escape", 0.3)
         rec.key("?", 0.4)                   # help
         rec.hold(1.5)

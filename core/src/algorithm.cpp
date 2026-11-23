@@ -13,6 +13,7 @@ const Algorithm* algo_lz77();
 const Algorithm* algo_lzw();
 const Algorithm* algo_bwt_mtf_ari();
 const Algorithm* algo_delta_rle();
+const Algorithm* algo_rbrc();
 
 namespace {
 
@@ -21,6 +22,7 @@ const std::vector<const Algorithm*>& registry() {
   static const std::vector<const Algorithm*> r = {
       algo_store(),  algo_rle(),    algo_huffman(), algo_lz77(),
       algo_lzw(),    algo_bwt_mtf_ari(), algo_delta_rle(),
+      algo_rbrc(),
   };
   return r;
 }

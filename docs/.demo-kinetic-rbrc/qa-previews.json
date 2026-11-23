@@ -1,0 +1,48 @@
+{
+  "stage": "previews",
+  "stills": [
+    {
+      "t": 1,
+      "beat": 1,
+      "missing": [],
+      "text": "compression is a black box.  || compression is a black box. "
+    },
+    {
+      "t": 5,
+      "beat": 2,
+      "missing": [],
+      "text": "02 / 07 eight methods. no evidence. 01 store 02 ple 03 huffman 04 1277 05 lzw 9 bwt-mtf-ari 07 delta-rle 88 rbrc  || 82 / 87 \u00b0 eight methods. \u00b0 no evidence. 01 store 02 ple 03 huffman u277 05 lzw 9 bwt-mtf-ari 07 delta-rle "
+    },
+    {
+      "t": 9,
+      "beat": 3,
+      "missing": [],
+      "text": "03 / 07 kolma measures first. analyser / benchmark aks er s/cach: w/ f re/sanp k ketna (\u2014 benchmark t\u2014 o ghi t algorithm ratio outpu throughput 1277 0.0151 currency) bwt-mtf-ari [ 0178 21 & 1 .29 mb/s nd memory limit) k law [ 0880 1.55 kib 64.97 mb/s huffman [} 5727 i8 fastest ed 154.10 wb/s store 1 0000 17.58 kib 121.58 mb/s rle 1 0000 17.58 kib 106.17 mb/s delta-rle 1 0000 17.58 kib 156.36 mb/s rati = omp e - o g n"
+    },
+    {
+      "t": 13,
+      "beat": 4,
+      "missing": [],
+      "text": "04 / 07 evidence, not vibes. original 11.37 mib compressed 6.11 mib 0.5376 throughput 39.30 mb/s ratio 0.5376 lz77 level 6 chunks 6 x 2.00 mib crc32 16bc7172 $ kolma compress /usr/bin/cmake  || 84 / 87 o \u00b0 evidence, not vibes. original 11.37 mib py compressed 6.11 mib throughput 39.30 mb/s ratio 0.5376 - lz77 level 6 chunks 6 x 2.00 mib crc32 16bc7172 $ kolma compress /usr/bin/cmake "
+    },
+    {
+      "t": 18,
+      "beat": 5,
+      "missing": [],
+      "text": "65 / 07 new: rbrc. run-boundary rank coder transition mask + block-static frequency-ranked alphabet 0.2590 57.1 mb/s rbrc 0.2590 lzw 0.2880 rle 0.3577 huffman 0.7510  || 85 / 07 new: rbrc [ [ ] run-boundary rank coder transition mask + block-static frequency-ranked alphabet \u00b0 57.1 mb/s rbrc \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014 () , 2590 lzw d \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014 0.2880 rle d \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014 0.3577 huffman \u2014\u2014\u2014\u2014\u2014 0.7510 "
+    },
+    {
+      "t": 23,
+      "beat": 6,
+      "missing": [],
+      "text": "06 / 07 one engine. three surfaces. terminal desktop command line aksh heen na-f4 . 17.58 k8 (- settings g auto (the analyzer decid compress text (text) avto (fron the priority) $ kolma compress <file> 4.3967 bits/byte or batanced squeeze or a pa drop fils or a whole folder. by default you get a zip anyone can open \u2014 switch to kolma's own for ord. 1277 98.5% chu ize auto (fron level and men auto (hardware concurren a"
+    },
+    {
+      "t": 28,
+      "beat": 7,
+      "missing": [],
+      "text": "07 / 07 kolma. langersword.github.io/kolma cohhrress /4 lnspeet j verifew  || 87 / 87 langersword.github.io/kolma eohpress /7 iwnspeet / veriliey "
+    }
+  ],
+  "pass": true
+}

@@ -35,7 +35,7 @@
   <title>Kolma — compression that shows its work</title>
   <meta name="description" content="A desktop app, terminal UI and CLI over one auditable C++ compression engine. Zip, tar and 7z out of the box, perceptual media shrinking, and split archives that extract in place." />
   <meta property="og:title" content="Kolma — compression that shows its work" />
-  <meta property="og:description" content="Seven methods, an analyser that decides with evidence, and archives anything can open. Free and open source." />
+  <meta property="og:description" content="Eight methods, an analyser that decides with evidence, and archives anything can open. Free and open source." />
   <meta property="og:image" content="{base}/screenshots/gui-compress.png" />
 </svelte:head>
 
@@ -84,9 +84,9 @@
     <!-- Stat strip -->
     <div class="stats">
       <div class="container stats-grid">
-        <div class="stat"><b>7</b><span>compression methods</span></div>
-        <div class="stat"><b><em>103</em></b><span>engine + integration tests</span></div>
-        <div class="stat"><b>416k</b><span>fuzz runs, zero crashes</span></div>
+        <div class="stat"><b>8</b><span>compression methods</span></div>
+        <div class="stat"><b><em>112</em></b><span>engine + integration tests</span></div>
+        <div class="stat"><b>421k</b><span>fuzz runs, zero crashes</span></div>
         <div class="stat"><b>3</b><span>operating systems</span></div>
       </div>
     </div>
@@ -113,6 +113,7 @@
               <div><span>lz77</span><b>0.0122</b></div>
               <div><span>lzw</span><b>0.0613</b></div>
               <div><span>huffman</span><b>0.5626</b></div>
+              <div><span>rbrc (short-run)</span><b>0.259</b></div>
             </div>
           </div>
           <div class="cell reveal">
@@ -177,7 +178,7 @@
       <div class="container">
         <div class="section-head reveal">
           <h2>What the trials measured.</h2>
-          <p>Every method on the same 1.8 MiB text corpus. Ratio is compressed over original, so lower is better.</p>
+          <p>Five general-purpose methods on the same 1.8 MiB text corpus. RBRC is measured separately on its short-run target shape.</p>
         </div>
         <div class="bench-wrap reveal">
           <div class="bench-scroll">
@@ -199,6 +200,7 @@
             </table>
           </div>
           <div class="bench-note">Single-threaded per method, GCC, Ryzen 7. Reproduce with <span class="mono">kolma bench &lt;file&gt;</span>. The full suite runs on every commit.</div>
+          <div class="bench-note">New: <span class="mono">rbrc</span> codes run boundaries through a block-static ranked alphabet. On 256 KiB slices of 64-symbol runs it measured <b>0.2590 at 57.1 MB/s</b>, ahead of LZW, RLE and Huffman. Not a general text winner.</div>
         </div>
       </div>
     </section>

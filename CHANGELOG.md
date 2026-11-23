@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.0 — 2026-11-24
+
+### Added
+
+- **RBRC — Run-Boundary Rank Coder**, an eighth compression method. It codes a
+  transition mask as the primary signal and resolves changed bytes through a
+  block-static, frequency-ranked alphabet, with a raw-literal escape. Built for
+  short-run, moderate-alphabet state and segmentation streams; on 256 KiB
+  synthetic slices it measured 0.2590 at 57.1 MB/s on 64-symbol runs of 3–8
+  bytes and 0.2682 at 57.5 MB/s on 256-symbol runs, beating LZW, RLE and Huffman
+  on those shapes. It is intentionally not claimed as a general text or binary
+  winner. See `docs/research/rbrc-prior-art.md` for mechanism, prior art and
+  measured limits.
+- Regenerated TUI/Qt method lists, benchmark counts, fuzz seeds and docs for the
+  eighth method.
+
 ## 1.2.0
 
 Universal formats, perceptual media shrinking, and split-volume archives with

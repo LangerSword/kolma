@@ -1,7 +1,7 @@
 # kolma
 
 **A compression engine that shows its work — with a desktop app, a terminal
-UI, and a CLI on top.** Seven methods behind one interface, an analyser that
+UI, and a CLI on top.** Eight methods behind one interface, an analyser that
 measures before it commits, a parallel chunk engine underneath, authenticated
 encryption, and folders bundled into a single archive. It also writes standard
 `.zip`/`.tar`/`.7z`, opens the archives everyone already has, shrinks videos and
@@ -21,7 +21,7 @@ Runs on Linux, macOS and Windows.
 [![watch the 30-second demo](https://img.shields.io/badge/watch_the_demo-30s-7dd3a0?style=flat-square)](docs/demo.mp4)
 
 `kolma` is a working implementation of a six-entity design: **User, File,
-Analyzer, Algorithm, Engine, Archive**. Seven compression methods live behind
+Analyzer, Algorithm, Engine, Archive**. Eight compression methods live behind
 one interface, an analyser measures the input before committing to a method, and
 the engine splits large files into chunks it compresses in parallel and verifies
 on the way back out. Nothing is claimed that the test suite does not exercise:
@@ -38,7 +38,7 @@ Three ways to use the same engine:
   file inspection and splitting. No flags, no jargon. Linux AppImage, macOS DMG,
   Windows zip.
 - **Terminal UI** (`kolma-tui`, Go/Charm) — a file manager with multi-select,
-  fuzzy filter, the analyser's evidence, and a benchmark of all seven methods.
+  fuzzy filter, the analyser's evidence, and a benchmark of all eight methods.
 - **CLI** (`kolma`) — scriptable, pipe-friendly, with a stable `--json` contract.
 
 ```
@@ -186,7 +186,7 @@ built for people who just want to compress and extract things.
 - **Tools.** Inspect any file (type, entropy, whether it will compress, CRC-32 +
   SHA-256), peek inside any archive without extracting, and split a file into
   numbered volumes with friendly part-size presets (1 MB … 4 GB FAT32-safe).
-- **Benchmark.** Race all seven methods on the same input and see ratio and
+- **Benchmark.** Race all eight methods on the same input and see ratio and
   throughput side by side.
 - **Preferences.** Default method, level, thread count and theme live in a small
   settings dialog and persist between runs.
@@ -279,7 +279,7 @@ kolma version
 
 | flag | meaning |
 | --- | --- |
-| `-a, --algo <id>` | `store`, `rle`, `huffman`, `lz77`, `lzw`, `bwt-mtf-ari`, `delta-rle`, or `auto` |
+| `-a, --algo <id>` | `store`, `rle`, `huffman`, `lz77`, `lzw`, `bwt-mtf-ari`, `delta-rle`, `rbrc`, or `auto` |
 | `-l, --level <1-9>` | effort; 1 is fastest, 9 is best ratio |
 | `-p, --priority <p>` | `maxratio`, `balanced`, `maxspeed` (used when `--algo` is `auto`) |
 | `-o, --out <path>` | output path; `-` writes the payload to stdout (reports go to stderr) |
@@ -340,9 +340,12 @@ them — they still extract normally from volumes.
 | `lzw` | dictionary, 9..12 bit variable codes | 0.43 | 40 MB/s | 2 MiB | 16 MiB | 4096 entries |
 | `bwt-mtf-ari` | BWT, move-to-front, order-0 range coder | 0.21 | 7 MB/s | 16 MiB | 256 KiB | – |
 | `delta-rle` | delta filter with a measured stride, then RLE | 0.35 | 240 MB/s | 4 MiB | 4 MiB | – |
+| `rbrc` | transition mask + block-static ranked alphabet | 0.26 | 58 MB/s | 1 MiB | 2 MiB | – |
 
-Ratios and speeds above are measured on a 1.91 MiB corpus of real C headers at
-level 6; see [Performance](#performance) for the full table and the machine.
+Ratios and speeds above are typical figures at level 6; most come from a 1.91
+MiB corpus of real C headers. `rbrc` is measured on the short-run state-stream
+corpus below, because C headers are not its niche. See [Performance](#performance)
+for the full tables and the machine.
 
 Three details that matter more than the table:
 
@@ -503,7 +506,7 @@ file path (loader, MAC/CRC gates, chunk pipeline), and every algorithm's
 `decompress_block` directly. It runs under AddressSanitizer +
 UndefinedBehaviorSanitizer, locally via `make fuzz` and for 60 seconds on every
 CI push. The seed corpus in `tests/fuzz_corpus/` includes real archives for all
-seven methods plus the regression inputs the fuzzer has found — among them a
+eight methods plus the regression inputs the fuzzer has found — among them a
 hostile Huffman code-length table that used to shift past 32 bits and index the
 decode table out of bounds. Crash inputs are kept as seeds, so a bug once found
 stays found.
@@ -543,6 +546,18 @@ fallback stores the input unchanged rather than growing it.
 | `lz77` | 0.5376 | 39.30 MB/s | 6 x 2 MiB |
 | `lzw` | 0.6219 | 89.53 MB/s | 6 x 2 MiB |
 | `huffman` | 0.7812 | 153.95 MB/s | 6 x 2 MiB |
+
+**RBRC's niche: short runs, moderate alphabet** (256 KiB synthetic slices,
+level 6). This is a deliberately separate comparison; RBRC does not beat the
+BWT-family methods on text, structured binary or telemetry:
+
+| corpus | `rbrc` | best existing method |
+| --- | --- | --- |
+| 64 symbols, runs of 3–8 bytes | **0.2590 @ 57.1 MB/s** | `lzw` 0.2880, `rle` 0.3577, `huffman` 0.7510 |
+| 256 symbols, runs of 3–8 bytes | **0.2682 @ 57.5 MB/s** | `bwt-mtf-ari` 0.3405, `rle` 0.3616, `huffman` 1.0000 |
+
+The algorithm and its prior-art boundary are documented in
+[`docs/research/rbrc-prior-art.md`](docs/research/rbrc-prior-art.md).
 
 **Level is a real trade-off, not a knob that does nothing** (`lz77`, 1.91 MiB of
 text, default chunking):

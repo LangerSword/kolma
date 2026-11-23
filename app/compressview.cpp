@@ -126,7 +126,7 @@ CompressView::CompressView(QWidget* parent) : QWidget(parent) {
   algoRow->addWidget(new QLabel("Method"));
   m_algo = new QComboBox;
   m_algo->addItems({"Auto (recommended)", "lz77", "bwt-mtf-ari", "lzw", "huffman",
-                    "delta-rle", "rle", "store"});
+                    "delta-rle", "rbrc", "rle", "store"});
   algoRow->addWidget(m_algo, 1);
   algoRow->addWidget(new QLabel("Priority"));
   m_priority = new QComboBox;

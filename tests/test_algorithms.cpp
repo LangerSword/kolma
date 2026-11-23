@@ -44,7 +44,7 @@ void round_trip(const Algorithm* algo, const Bytes& input, int level) {
 }  // namespace
 
 KOLMA_TEST(registry_is_stable_and_complete) {
-  CHECK_EQ(all_algorithms().size(), size_t(7));
+  CHECK_EQ(all_algorithms().size(), size_t(8));
   CHECK_EQ(algorithm_index("store"), uint8_t(0));
   CHECK_EQ(algorithm_index("rle"), uint8_t(1));
   CHECK_EQ(algorithm_index("huffman"), uint8_t(2));
@@ -52,7 +52,9 @@ KOLMA_TEST(registry_is_stable_and_complete) {
   CHECK_EQ(algorithm_index("lzw"), uint8_t(4));
   CHECK_EQ(algorithm_index("bwt-mtf-ari"), uint8_t(5));
   CHECK_EQ(algorithm_index("delta-rle"), uint8_t(6));
+  CHECK_EQ(algorithm_index("rbrc"), uint8_t(7));
   CHECK_EQ(algorithm_by_index(6)->params().id, std::string("delta-rle"));
+  CHECK_EQ(algorithm_by_index(7)->params().id, std::string("rbrc"));
   CHECK(algorithm_by_index(200) == nullptr);
   CHECK(find_algorithm("nope") == nullptr);
   CHECK_EQ(clamp_level(0), 1);
@@ -241,4 +243,167 @@ KOLMA_TEST(higher_levels_do_not_lose_ratio) {
     throw kolma_test::Failure("level 3 (" + std::to_string(l3) + ") is worse than level 1 (" +
                               std::to_string(l1) + ")");
   }
+}
+
+// ------------------------------------------------------- rbrc (index 7) ----
+// A static run-boundary rank coder: the header carries the whole model, so the
+// decoder never adapts. These tests pin the format as well as the behaviour.
+
+KOLMA_TEST(rbrc_round_trips_every_fixture_at_every_level) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);  // clean RED failure until the algorithm is registered
+  for (const Fixture& f : fixtures()) {
+    for (int level : {1, 6, 9}) round_trip(rbrc, f.second, level);
+  }
+}
+
+KOLMA_TEST(rbrc_empty_block_is_only_a_zero_varint) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes out;
+  rbrc->compress_block(View{}, out, 6);
+  CHECK_BYTES_EQ(out, Bytes{0});
+  Bytes restored;
+  rbrc->decompress_block(View(out), restored, 0);
+  CHECK(restored.empty());
+}
+
+KOLMA_TEST(rbrc_level_chooses_the_alphabet_cap) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes all_bytes;
+  for (int i = 0; i < 256; ++i) all_bytes.push_back(uint8_t(i));
+
+  for (auto [level, cap] : {std::pair<int, int>{1, 8}, {3, 8}, {4, 16}, {6, 16}, {7, 32}, {9, 32}}) {
+    Bytes out;
+    rbrc->compress_block(View(all_bytes), out, level);
+    size_t pos = 0;
+    uint64_t declared = 0;
+    CHECK(get_varint(View(out), pos, declared));
+    CHECK_EQ(declared, uint64_t(all_bytes.size()));
+    uint16_t n = 0;
+    CHECK(get_u16(View(out), pos, n));
+    CHECK_EQ(n, uint16_t(cap));
+  }
+}
+
+KOLMA_TEST(rbrc_shrinks_low_cardinality_high_transition_data) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  // Four symbols, changing on roughly three of every four bytes: the shape
+  // RBRC is built for. Frequencies are near-uniform, so the rank model needs
+  // about two bits per transition and the escape is essentially never used.
+  Bytes stream;
+  uint32_t x = 0x9E3779B9u;
+  const char alphabet[] = {'A', 'C', 'G', 'T'};
+  stream.reserve(65536);
+  for (size_t i = 0; i < 65536; ++i) {
+    x = x * 1664525u + 1013904223u;
+    stream.push_back(uint8_t(alphabet[(x >> 8) & 3u]));
+  }
+  Bytes out;
+  rbrc->compress_block(View(stream), out, 6);
+  CHECK(out.size() < stream.size() / 2);
+  round_trip(rbrc, stream, 6);
+}
+
+KOLMA_TEST(rbrc_does_not_meaningfully_shrink_random_data) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes noise = kolma_test::make_random(65536, 99);
+  Bytes out;
+  rbrc->compress_block(View(noise), out, 6);
+  // The literal fallback costs eight bits plus framing; a static model must
+  // not pretend that incompressible input got smaller.
+  CHECK(out.size() > noise.size() * 95 / 100);
+}
+
+KOLMA_TEST(rbrc_rejects_hostile_headers) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes restored;  // must never be filled from a bad header
+
+  auto header = [](uint64_t declared, const std::vector<uint8_t>& syms,
+                   const std::vector<uint8_t>& weights, uint16_t p1, uint16_t esc) {
+    Bytes b;
+    put_varint(b, declared);
+    put_u16(b, uint16_t(syms.size()));
+    b.insert(b.end(), syms.begin(), syms.end());
+    b.insert(b.end(), weights.begin(), weights.end());
+    put_u16(b, p1);
+    put_u16(b, esc);
+    b.insert(b.end(), 16, 0);  // nominal range-coded payload
+    return b;
+  };
+
+  const std::vector<uint8_t> two{'A', 'B'};
+  const std::vector<uint8_t> flat{127, 128};
+  const std::vector<uint8_t> eight{'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'};
+  const std::vector<uint8_t> eight_weights{32, 32, 32, 32, 32, 32, 32, 31};
+
+  Bytes declared_wrong = header(15, two, flat, 32768, 1);
+  CHECK_THROWS(rbrc->decompress_block(View(declared_wrong), restored, 16));
+
+  Bytes truncated_header;
+  put_varint(truncated_header, 16);
+  CHECK_THROWS(rbrc->decompress_block(View(truncated_header), restored, 16));
+
+  Bytes oversized_n;
+  put_varint(oversized_n, 16);
+  put_u16(oversized_n, 257);
+  CHECK_THROWS(rbrc->decompress_block(View(oversized_n), restored, 16));
+
+  Bytes empty_alphabet = header(16, {}, {}, 32768, 1);
+  CHECK_THROWS(rbrc->decompress_block(View(empty_alphabet), restored, 16));
+
+  Bytes duplicate = header(16, {'A', 'A'}, flat, 32768, 1);
+  CHECK_THROWS(rbrc->decompress_block(View(duplicate), restored, 16));
+
+  Bytes zero_weight = header(16, two, {0, 255}, 32768, 1);
+  CHECK_THROWS(rbrc->decompress_block(View(zero_weight), restored, 16));
+
+  Bytes zero_transition = header(16, two, flat, 0, 1);
+  CHECK_THROWS(rbrc->decompress_block(View(zero_transition), restored, 16));
+
+  Bytes zero_escape = header(16, two, flat, 32768, 0);
+  CHECK_THROWS(rbrc->decompress_block(View(zero_escape), restored, 16));
+
+  // Escape 65535 leaves a rank total of 1, too small for an eight-symbol rank
+  // model: every rank would have zero frequency.
+  Bytes no_room = header(16, eight, eight_weights, 32768, 65535);
+  CHECK_THROWS(rbrc->decompress_block(View(no_room), restored, 16));
+}
+
+KOLMA_TEST(rbrc_corruption_changes_output_or_throws) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes text = kolma_test::make_text_like(8192);
+  Bytes compressed;
+  rbrc->compress_block(View(text), compressed, 6);
+  CHECK(compressed.size() > 16);
+  Bytes damaged = compressed;
+  damaged[damaged.size() / 2] ^= 0x40;
+  bool noticed = false;
+  try {
+    Bytes restored;
+    rbrc->decompress_block(View(damaged), restored, text.size());
+    noticed = (restored != text);
+  } catch (const std::exception&) {
+    noticed = true;
+  }
+  CHECK(noticed);
+}
+
+KOLMA_TEST(rbrc_truncated_block_is_rejected) {
+  const Algorithm* rbrc = find_algorithm("rbrc");
+  CHECK(rbrc != nullptr);
+  Bytes text = kolma_test::make_text_like(4096);
+  Bytes compressed;
+  rbrc->compress_block(View(text), compressed, 6);
+  CHECK(compressed.size() > 16);
+  Bytes cut(compressed.begin(), compressed.begin() + std::ptrdiff_t(compressed.size() / 2));
+  // Unlike the adaptive arithmetic stream in bwt-mtf-ari, RBRC's decoder
+  // checks its range-coder reads and refuses to invent missing bytes.
+  Bytes restored;
+  CHECK_THROWS(rbrc->decompress_block(View(cut), restored, text.size()));
 }

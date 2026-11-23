@@ -38,7 +38,7 @@
 
 namespace {
 
-const char* kVersion = "1.2.0";
+const char* kVersion = "1.3.0";
 
 std::string json_escape(const std::string& s) {
   std::string out;
@@ -212,7 +212,7 @@ void print_usage(std::ostream& os) {
      << "  kolma algos      [--json]\n"
      << "  kolma version\n\n"
      << "options:\n"
-     << "  -a, --algo <id>        store | rle | huffman | lz77 | lzw | bwt-mtf-ari | delta-rle | auto\n"
+     << "  -a, --algo <id>        store | rle | huffman | lz77 | lzw | bwt-mtf-ari | delta-rle | rbrc | auto\n"
      << "  -l, --level <1-9>      effort; 1 = fastest, 9 = best ratio\n"
      << "  -p, --priority <p>     maxratio | balanced | maxspeed (used when --algo is auto)\n"
      << "  -o, --out <path>       output path; - writes to stdout (reports go to stderr)\n"

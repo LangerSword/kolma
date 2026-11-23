@@ -134,3 +134,31 @@ KOLMA_TEST(small_files_are_not_worth_compressing) {
   // Two bytes cannot beat their own framing, so the veto must fire.
   CHECK(a.store_raw);
 }
+
+KOLMA_TEST(analyzer_trials_rbrc_on_low_cardinality_streams) {
+  const std::string path = kolma_test::temp_path("analyze-rbrc.bin");
+  Bytes stream;
+  uint32_t x = 0x9E3779B9u;
+  const char alphabet[] = {'A', 'C', 'G', 'T'};
+  stream.reserve(200000);
+  for (size_t i = 0; i < 200000; ++i) {
+    x = x * 1664525u + 1013904223u;
+    stream.push_back(uint8_t(alphabet[(x >> 8) & 3u]));
+  }
+  kolma_test::write_bytes(path, stream);
+
+  for (Priority priority : {Priority::Balanced, Priority::MaxRatio, Priority::MaxSpeed}) {
+    Analysis a = analyze_file(path, priority);
+    CHECK(a.file.exists);
+    CHECK(!a.store_raw);
+    bool trialled = false;
+    for (const AlgoTrial& t : a.trials) {
+      if (t.algo_id == "rbrc") {
+        trialled = true;
+        CHECK(t.ratio < 0.5);  // its target shape must actually pay off
+      }
+    }
+    CHECK(trialled);
+    CHECK(a.rationale.find("rbrc") != std::string::npos);
+  }
+}

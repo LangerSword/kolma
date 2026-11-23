@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Kolma — kinetic product demo (RBRC)</title>
+<style>
+@font-face { font-family: 'KG'; src: url('../assets/fonts/SpaceGrotesk.ttf') format('truetype'); font-weight: 400 700; }
+@font-face { font-family: 'KM'; src: url('../assets/fonts/JetBrainsMono.ttf') format('truetype'); font-weight: 400 700; }
+:root { --bg:#08090b; --fg:#ffffff; --accent:#55e6a5; --dim:#8d9298; --line:rgba(255,255,255,.16); }
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; width:1920px; height:1080px; overflow:hidden; background:var(--bg); color:var(--fg); }
+body { font-family:'KG', Arial, sans-serif; -webkit-font-smoothing:antialiased; }
+#film { position:absolute; inset:0; background:
+  radial-gradient(1100px 700px at 68% 42%, rgba(85,230,165,.035), transparent 70%),
+  repeating-linear-gradient(0deg, rgba(255,255,255,.014) 0 1px, transparent 1px 4px), var(--bg); }
+.scene { position:absolute; inset:0; opacity:0; will-change:opacity,transform; }
+.inner { position:absolute; inset:0; padding:110px 130px 92px; }
+.mono { font-family:'KM', 'Courier New', monospace; }
+.kicker { font-family:'KM', monospace; font-size:22px; letter-spacing:5px; color:var(--accent); text-transform:uppercase; }
+.heading { font-size:86px; line-height:1.06; letter-spacing:-2.4px; font-weight:700; margin:0; }
+.heading .accent { color:var(--accent); }
+.rule { height:4px; background:var(--accent); transform-origin:left center; }
+.label { font-family:'KM', monospace; font-size:22px; letter-spacing:2px; color:var(--dim); text-transform:uppercase; }
+
+/* beat 1 */
+#s1 .inner { display:flex; flex-direction:column; justify-content:center; }
+#s1 .line { font-size:110px; line-height:1.04; letter-spacing:-2px; font-weight:700; }
+#s1 .line.two { margin-top:12px; }
+#s1 .accent { color:var(--accent); }
+#s1 .rule { width:680px; margin-top:46px; }
+#s1 .w { font-size:110px; }
+
+/* beat 2 */
+#s2 .heading { font-size:92px; }
+#s2 .heading .l2 { display:block; }
+#s2 .chips { display:grid; grid-template-columns:repeat(4, 352px); gap:18px; margin-top:70px; }
+#s2 .chip { height:78px; display:flex; align-items:center; padding:0 22px; border:1px solid var(--line);
+  font-family:'KM', monospace; font-size:26px; letter-spacing:.4px; color:#e8eaec; background:rgba(255,255,255,.025); }
+#s2 .chip.new { border-color:var(--accent); color:var(--accent); background:rgba(85,230,165,.07); }
+#s2 .chip .num { color:var(--dim); font-size:17px; margin-right:16px; }
+
+/* beat 3 */
+#s3 .top { position:absolute; left:130px; top:112px; right:130px; display:flex; justify-content:space-between; align-items:flex-end; }
+#s3 .shot { position:absolute; left:50%; top:56%; width:1040px; height:740px; margin:-370px 0 0 -520px;
+  border:1px solid rgba(255,255,255,.28); box-shadow:0 40px 110px rgba(0,0,0,.65), 0 0 0 10px rgba(255,255,255,.025); background:#0d0f12; }
+#s3 .shot img { width:100%; height:100%; object-fit:contain; display:block; }
+#s3 .caption { position:absolute; left:130px; bottom:56px; }
+
+/* beat 4 */
+#s4 .heading { font-size:82px; }
+#s4 .grid { position:absolute; left:130px; right:130px; top:300px; display:grid; grid-template-columns:1fr 700px; gap:70px; align-items:start; }
+#s4 .big { font-family:'KM', monospace; font-size:180px; line-height:1; letter-spacing:2px; font-weight:700; color:var(--accent); }
+#s4 .biglabel { margin-top:22px; font-family:'KM', monospace; font-size:24px; letter-spacing:3px; color:var(--dim); text-transform:uppercase; }
+#s4 .rows { border-top:1px solid var(--line); }
+#s4 .row { display:flex; justify-content:space-between; align-items:baseline; padding:18px 0; border-bottom:1px solid var(--line);
+  font-family:'KM', monospace; font-size:28px; }
+#s4 .row span:first-child { color:var(--dim); font-size:21px; letter-spacing:1px; text-transform:uppercase; }
+#s4 .row b { font-weight:700; }
+#s4 .foot { position:absolute; left:130px; bottom:58px; }
+
+/* beat 5 */
+#s5 .heading .accent { color:var(--accent); }
+#s5 .hero { position:absolute; left:130px; top:280px; display:flex; align-items:baseline; gap:46px; }
+#s5 .big { font-size:216px; line-height:.9; letter-spacing:-11px; font-weight:700; color:var(--accent); }
+#s5 .speed { font-size:88px; font-weight:700; letter-spacing:-3px; }
+#s5 .cmp { position:absolute; left:130px; top:570px; width:1000px; border-top:1px solid var(--line); }
+#s5 .cmp .row { display:grid; grid-template-columns:190px 1fr 150px; align-items:center; gap:24px; padding:14px 0; border-bottom:1px solid var(--line);
+  font-family:'KM', monospace; font-size:24px; }
+#s5 .cmp .name { color:var(--dim); }
+#s5 .cmp .bar { height:8px; background:rgba(255,255,255,.1); }
+#s5 .cmp .bar i { display:block; height:100%; background:var(--accent); width:0; }
+#s5 .cmp .row:first-child .name, #s5 .cmp .row:first-child .val { color:var(--accent); }
+#s5 .caption { position:absolute; left:130px; bottom:58px; font-family:'KM', monospace; font-size:22px; letter-spacing:1px; color:var(--dim); }
+#s5 .tag { position:absolute; right:130px; top:320px; width:540px; font-family:'KM', monospace; font-size:22px; line-height:1.6; color:var(--dim); border-left:3px solid var(--accent); padding-left:24px; }
+
+/* beat 6 */
+#s6 .panels { position:absolute; left:130px; right:130px; top:266px; display:grid; grid-template-columns:repeat(3, 1fr); gap:34px; }
+#s6 .panel { height:620px; border:1px solid var(--line); background:rgba(255,255,255,.02); overflow:hidden; }
+#s6 .panel .cap { font-family:'KM', monospace; font-size:19px; letter-spacing:3px; color:var(--accent); padding:20px 22px; border-bottom:1px solid var(--line); }
+#s6 .panel img { width:100%; height:calc(100% - 62px); object-fit:cover; display:block; }
+#s6 .cli { padding:28px 26px; font-family:'KM', monospace; font-size:23px; line-height:1.85; color:#e8eaec; }
+#s6 .cli .p { color:var(--accent); }
+#s6 .cli .out { color:var(--dim); font-size:19px; }
+
+/* beat 7 */
+#s7 .inner { display:flex; flex-direction:column; align-items:center; justify-content:center; }
+#s7 .lock { font-size:266px; line-height:1; letter-spacing:-14px; font-weight:700; }
+#s7 .lock .dot { color:var(--accent); }
+#s7 .url { margin-top:26px; font-family:'KM', monospace; font-size:50px; letter-spacing:-1px; color:var(--accent); }
+#s7 .tag { margin-top:48px; font-family:'KM', monospace; font-size:22px; letter-spacing:8px; color:var(--dim); }
+
+/* hud */
+#hud { position:absolute; inset:0; pointer-events:none; }
+#beatno { position:absolute; right:44px; top:38px; font-family:'KM', monospace; font-size:18px; letter-spacing:4px; color:var(--dim); }
+#track { position:absolute; left:0; right:0; bottom:0; height:5px; background:rgba(255,255,255,.08); }
+#fill { height:100%; width:0; background:var(--accent); transform-origin:left center; }
+.tick { position:absolute; bottom:5px; width:2px; height:12px; background:rgba(255,255,255,.22); }
+</style>
+</head>
+<body>
+<div id="film">
+
+  <section class="scene" id="s1" data-a="0" data-b="3.4">
+    <div class="inner">
+      <div class="line l1">Compression&nbsp;&nbsp;is a</div>
+      <div class="line l2"><span class="accent">black</span> box.</div>
+      <div class="rule"></div>
+    </div>
+  </section>
+
+  <section class="scene" id="s2" data-a="3.4" data-b="7.0">
+    <div class="inner">
+      <h2 class="heading"><span class="l1">Eight methods. </span><span class="l2 accent">No evidence.</span></h2>
+      <div class="chips">
+        <div class="chip"><span class="num">01</span>store</div>
+        <div class="chip"><span class="num">02</span>rle</div>
+        <div class="chip"><span class="num">03</span>huffman</div>
+        <div class="chip"><span class="num">04</span>lz77</div>
+        <div class="chip"><span class="num">05</span>lzw</div>
+        <div class="chip"><span class="num">06</span>bwt-mtf-ari</div>
+        <div class="chip"><span class="num">07</span>delta-rle</div>
+        <div class="chip new"><span class="num">08</span>rbrc</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" id="s3" data-a="7.0" data-b="11.2">
+    <div class="inner">
+      <div class="top">
+        <h2 class="heading">Kolma measures first.</h2>
+        <div class="label">analyser / benchmark</div>
+      </div>
+      <div class="shot"><img src="../screenshots/tui-bench.png" alt="Kolma terminal benchmark screenshot"></div>
+      <div class="caption label">REAL ENGINE OUTPUT · docs/screenshots/tui-bench.png</div>
+    </div>
+  </section>
+
+  <section class="scene" id="s4" data-a="11.2" data-b="16.6">
+    <div class="inner">
+      <h2 class="heading">Evidence, not vibes.</h2>
+      <div class="grid">
+        <div>
+          <div class="big">0.5376</div>
+          <div class="biglabel">ratio 0.5376 · lz77 level 6</div>
+        </div>
+        <div class="rows">
+          <div class="row"><span>original</span><b>11.37 MiB</b></div>
+          <div class="row"><span>compressed</span><b>6.11 MiB</b></div>
+          <div class="row"><span>throughput</span><b>39.30 MB/s</b></div>
+          <div class="row"><span>chunks</span><b>6 x 2.00 MiB</b></div>
+          <div class="row"><span>crc32</span><b>16bc7172</b></div>
+        </div>
+      </div>
+      <div class="foot label">$ kolma compress /usr/bin/cmake</div>
+    </div>
+  </section>
+
+  <section class="scene" id="s5" data-a="16.6" data-b="21.2">
+    <div class="inner">
+      <h2 class="heading"><span class="accent">New:</span> RBRC.</h2>
+      <div class="hero">
+        <div class="big">0.2590</div>
+        <div class="speed">57.1 MB/s</div>
+      </div>
+      <div class="cmp">
+        <div class="row"><span class="name">rbrc</span><span class="bar"><i data-w="100"></i></span><span class="val">0.2590</span></div>
+        <div class="row"><span class="name">lzw</span><span class="bar"><i data-w="86"></i></span><span class="val">0.2880</span></div>
+        <div class="row"><span class="name">rle</span><span class="bar"><i data-w="70"></i></span><span class="val">0.3577</span></div>
+        <div class="row"><span class="name">huffman</span><span class="bar"><i data-w="34"></i></span><span class="val">0.7510</span></div>
+      </div>
+      <div class="tag">RUN-BOUNDARY RANK CODER<br>transition mask + block-static<br>frequency-ranked alphabet</div>
+      <div class="caption">256 KiB slices · 64 symbols · runs of 3–8 bytes · level 6</div>
+    </div>
+  </section>
+
+  <section class="scene" id="s6" data-a="21.2" data-b="25.6">
+    <div class="inner">
+      <h2 class="heading">One engine. Three surfaces.</h2>
+      <div class="panels">
+        <div class="panel"><div class="cap">TERMINAL</div><img src="../screenshots/tui-inspect.png" alt="Kolma terminal UI"></div>
+        <div class="panel"><div class="cap">DESKTOP</div><img src="../screenshots/gui-compress.png" alt="Kolma desktop app"></div>
+        <div class="panel"><div class="cap">COMMAND LINE</div><div class="cli">
+          <div><span class="p">$</span> kolma compress &lt;file&gt;</div>
+          <div class="out">aut analyser · chose method</div><br>
+          <div><span class="p">$</span> kolma bench &lt;file&gt;</div>
+          <div class="out">all eight methods, one table</div><br>
+          <div><span class="p">$</span> kolma info &lt;archive&gt;</div>
+          <div class="out">header · sizes · integrity</div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="scene" id="s7" data-a="25.6" data-b="30.001">
+    <div class="inner">
+      <div class="lock">kolma<span class="dot">.</span></div>
+      <div class="url">langersword.github.io/kolma</div>
+      <div class="tag">COMPRESS / INSPECT / VERIFY</div>
+    </div>
+  </section>
+
+  <div id="hud">
+    <div id="beatno">01 / 07</div>
+    <div class="tick" style="left:11.33%"></div><div class="tick" style="left:23.33%"></div>
+    <div class="tick" style="left:37.33%"></div><div class="tick" style="left:55.33%"></div>
+    <div class="tick" style="left:70.67%"></div><div class="tick" style="left:85.33%"></div>
+    <div id="track"><div id="fill"></div></div>
+  </div>
+</div>
+<script src="timeline.js"></script>
+</body>
+</html>
