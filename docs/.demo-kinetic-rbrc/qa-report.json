@@ -17,7 +17,7 @@
         "index": 1,
         "codec_name": "aac",
         "codec_type": "audio",
-        "sample_rate": "96000",
+        "sample_rate": "44100",
         "channels": 2,
         "r_frame_rate": "0/0",
         "avg_frame_rate": "0/0"
@@ -25,22 +25,22 @@
     ],
     "format": {
       "duration": "30.000000",
-      "size": "4939937",
-      "bit_rate": "1317316"
+      "size": "4977625",
+      "bit_rate": "1327366"
     }
   },
   "decode_errors": [],
   "loudness": {
-    "input_i": "-16.49",
-    "input_tp": "-2.42",
-    "input_lra": "3.20",
-    "input_thresh": "-26.60",
-    "output_i": "-16.06",
-    "output_tp": "-2.19",
-    "output_lra": "2.70",
-    "output_thresh": "-26.11",
+    "input_i": "-16.18",
+    "input_tp": "-4.02",
+    "input_lra": "1.40",
+    "input_thresh": "-26.48",
+    "output_i": "-16.05",
+    "output_tp": "-4.00",
+    "output_lra": "0.90",
+    "output_thresh": "-26.23",
     "normalization_type": "dynamic",
-    "target_offset": "0.06"
+    "target_offset": "0.05"
   },
   "first_frame_luma_mean": 12.67,
   "first_frame_luma_max": 185,
@@ -97,7 +97,7 @@
     "bytes": 4794233
   },
   "files": {
-    "mp4_bytes": 4939937,
+    "mp4_bytes": 4977625,
     "gif_bytes": 4794233
   },
   "pass": true
