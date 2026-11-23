@@ -520,6 +520,12 @@ bool extract_multipart(const VolumeSet& vs, const std::string& dest_dir,
 
 #else  // !KOLMA_HAVE_LIBARCHIVE
 
+bool test_multipart(const VolumeSet&, uint64_t& entries, std::string& error) {
+  entries = 0;
+  error = "multipart testing needs libarchive (not built)";
+  return false;
+}
+
 bool extract_multipart(const VolumeSet&, const std::string&, const MultipartExtractOptions&,
                        std::string& error, const ProgressFn&) {
   error = "multipart extraction needs libarchive (not built)";
