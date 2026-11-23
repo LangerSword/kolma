@@ -557,7 +557,9 @@ BWT-family methods on text, structured binary or telemetry:
 | 256 symbols, runs of 3–8 bytes | **0.2682 @ 57.5 MB/s** | `bwt-mtf-ari` 0.3405, `rle` 0.3616, `huffman` 1.0000 |
 
 The algorithm and its prior-art boundary are documented in
-[`docs/research/rbrc-prior-art.md`](docs/research/rbrc-prior-art.md).
+[`docs/research/rbrc-prior-art.md`](docs/research/rbrc-prior-art.md). REA-checked
+artifact identities and interop evidence are in
+[`docs/research/rea-artifact-evidence.md`](docs/research/rea-artifact-evidence.md).
 
 **Level is a real trade-off, not a knob that does nothing** (`lz77`, 1.91 MiB of
 text, default chunking):
