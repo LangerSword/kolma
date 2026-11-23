@@ -18,6 +18,8 @@ Runs on Linux, macOS and Windows.
 
 ![kolma desktop](docs/screenshots/gui-compress.png)
 
+[![watch the 30-second demo](https://img.shields.io/badge/watch_the_demo-30s-7dd3a0?style=flat-square)](docs/demo.mp4)
+
 `kolma` is a working implementation of a six-entity design: **User, File,
 Analyzer, Algorithm, Engine, Archive**. Seven compression methods live behind
 one interface, an analyser measures the input before committing to a method, and
